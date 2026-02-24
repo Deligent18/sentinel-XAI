@@ -1,0 +1,21 @@
+student_id,name,programme,year,gpa_sem1,gpa_sem2,gpa_sem3,attendance,lms_logins,facility_access,library_visits,after_hours_wifi,assignment_submissions,risk_label
+N00411234,Tinashe Moyo,BSc Computer Science,3,3.6,3.2,2.4,48,3,1,0,12,6,high
+N00523891,Rumbidzai Chikwanda,BSc Psychology,2,3.8,3.5,3.1,67,11,4,2,8,8,medium
+N00614782,Farai Dube,BEng Electrical Engineering,4,3.2,3.0,2.8,72,18,7,4,15,12,medium
+N00732156,Blessing Ncube,BSc Mathematics,1,3.5,0,0,88,27,14,10,6,4,low
+N00849023,Tapiwa Sibanda,BCom Accounting,3,3.4,2.9,2.0,31,1,0,0,2,2,high
+N00952341,Kudzai Mutombwa,BSc Information Systems,2,3.1,2.8,2.5,55,8,3,1,10,7,medium
+N01067892,Praise Magaya,BSc Software Engineering,3,2.8,2.5,2.2,42,5,1,0,14,5,high
+N01174563,Charmaine Mpofu,BCom Marketing,1,3.7,0,0,82,22,12,8,4,3,low
+N01283456,Taurai Zhanje,BEng Mechanical,4,3.0,2.7,2.4,65,14,5,3,11,10,medium
+N01392167,Precious Mhlanga,BSc Nursing,2,3.9,3.7,3.4,91,30,18,12,3,9,low
+N01456789,Andrew Ncube,BSc Civil Engineering,3,2.6,2.3,1.9,38,2,0,0,8,3,high
+N01567891,Sarah Dube,BSc Psychology,1,3.4,0,0,75,20,9,6,5,4,low
+N01678912,Marcus Moyo,BCom Finance,4,3.3,3.1,2.9,70,16,6,4,9,11,medium
+N01789123,Faith Hlongwane,BSc Biology,2,3.5,3.2,2.9,78,24,15,9,7,8,low
+N01891234,Joseph Ngwenya,BEng Electrical,3,2.9,2.6,2.3,58,10,4,2,12,6,medium
+N01912345,Grace Murapa,BSc Chemistry,1,3.8,0,0,85,26,13,10,2,3,low
+N02023456,David Sibanda,BSc Physics,2,3.2,2.9,2.6,62,12,5,3,8,7,medium
+N02134567,Ruth Chikomo,BSc Mathematics,4,3.6,3.4,3.2,88,28,16,11,4,12,low
+N02245678,Michael Dube,BCom Accounting,3,2.7,2.4,2.1,45,6,2,1,13,4,high
+N02356789,Esther Moyo,BSc Computer Science,1,3.9,0,0,92,31,19,14,1,4,low
