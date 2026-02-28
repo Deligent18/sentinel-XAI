@@ -4,26 +4,35 @@ Student Mental Health Risk Monitoring System (NUST)
 With Automated ML Pipeline Integration
 """
 
+import os
+from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import json
-import os
+import threading
+
+# Load environment variables
+load_dotenv()
 
 # Import ML Pipeline (optional - graceful degradation if not available)
 try:
     from ml_pipeline import pipeline, run_full_pipeline
     from data_service import data_service, get_statistics
+    from academic_results import get_academic_results
     ML_PIPELINE_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: ML Pipeline not available - {e}")
     ML_PIPELINE_AVAILABLE = False
     pipeline = None
     data_service = None
+    def get_academic_results(students, programme):
+        return {"status": "error", "message": "Academic results module not available"}
 
 app = FastAPI(
     title="XAI Risk Sentinel API",
@@ -31,8 +40,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Secret key for JWT (change in production - use environment variable)
-SECRET_KEY = "xai-risk-sentinel-secret-key-2026-nust-informatics"
+# Secret key for JWT - load from environment variable with fallback
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "xai-risk-sentinel-secret-key-2026-nust-informatics")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -593,6 +602,244 @@ async def ingest_data(file_path: Optional[str] = None):
         return {"status": "success", "records_loaded": len(api_students)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ACADEMIC RESULTS ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/academic-results/{programme}")
+async def get_programme_academic_results(
+    programme: str, 
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get academic results for a specific programme across 8 semesters.
+    Returns class average GPA for each semester.
+    """
+    try:
+        results = get_academic_results(STUDENTS, programme)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PREPROCESSING PIPELINE ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Global state for preprocessing pipeline
+PREPROCESSING_STATE = {
+    "status": "idle",
+    "started_at": None,
+    "completed_at": None,
+    "error": None,
+    "current_step": 0,
+    "steps_completed": [],
+    "progress": []
+}
+
+# Check if data_preprocessing.py exists
+def check_preprocessing_available():
+    """Check if data_preprocessing.py file exists."""
+    import sys
+    import os
+    # Check in current directory and parent directory
+    paths_to_check = [
+        os.path.join(os.path.dirname(__file__), '..', 'data_preprocessing.py'),
+        os.path.join(os.path.dirname(__file__), 'data_preprocessing.py'),
+        'data_preprocessing.py',
+    ]
+    for path in paths_to_check:
+        if os.path.exists(path):
+            return True
+    return False
+
+@app.post("/preprocessing/run")
+async def run_preprocessing(current_user: dict = Depends(get_current_user)):
+    """
+    Run the data preprocessing pipeline in a background thread.
+    Requires JWT authentication.
+    """
+    global PREPROCESSING_STATE
+    
+    # Check if already running
+    if PREPROCESSING_STATE["status"] == "running":
+        return {"status": "already_running", "message": "Pipeline is already running"}
+    
+    # Check if preprocessing script exists
+    if not check_preprocessing_available():
+        raise HTTPException(status_code=503, detail="data_preprocessing.py not found")
+    
+    # Reset state
+    PREPROCESSING_STATE = {
+        "status": "running",
+        "started_at": datetime.utcnow().isoformat(),
+        "completed_at": None,
+        "error": None,
+        "current_step": 0,
+        "steps_completed": [],
+        "progress": []
+    }
+    
+    # Broadcast started message
+    await manager.broadcast({
+        "type": "preprocessing_started",
+        "data": {"started_at": PREPROCESSING_STATE["started_at"]}
+    })
+    
+    def run_preprocessing_thread():
+        """Background thread to run preprocessing."""
+        global PREPROCESSING_STATE
+        try:
+            # Import and run preprocessing
+            import sys
+            import os
+            
+            # Add current directory to path
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = os.path.dirname(current_dir)
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+            
+            # Progress callback function
+            def progress_callback(progress_info):
+                global PREPROCESSING_STATE
+                step = progress_info.get("step", 0)
+                label = progress_info.get("label", "")
+                status = progress_info.get("status", "running")
+                detail = progress_info.get("detail", "")
+                
+                PREPROCESSING_STATE["current_step"] = step
+                PREPROCESSING_STATE["progress"].append({
+                    "step": step,
+                    "label": label,
+                    "status": status,
+                    "detail": detail,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                
+                # Broadcast progress
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(manager.broadcast({
+                            "type": "preprocessing_progress",
+                            "data": progress_info
+                        }))
+                except:
+                    pass
+            
+            # Import the preprocessing module
+            from data_preprocessing import main as preprocessing_main
+            preprocessing_main(progress_callback=progress_callback)
+            
+            # Mark as complete
+            PREPROCESSING_STATE["status"] = "complete"
+            PREPROCESSING_STATE["completed_at"] = datetime.utcnow().isoformat()
+            
+            # Broadcast complete
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(manager.broadcast({
+                        "type": "preprocessing_complete",
+                        "data": {"completed_at": PREPROCESSING_STATE["completed_at"]}
+                    }))
+            except:
+                pass
+                
+        except Exception as e:
+            PREPROCESSING_STATE["status"] = "failed"
+            PREPROCESSING_STATE["error"] = str(e)
+            PREPROCESSING_STATE["completed_at"] = datetime.utcnow().isoformat()
+            
+            # Broadcast failed
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(manager.broadcast({
+                        "type": "preprocessing_failed",
+                        "data": {"error": str(e)}
+                    }))
+            except:
+                pass
+    
+    # Start background thread
+    thread = threading.Thread(target=run_preprocessing_thread, daemon=True)
+    thread.start()
+    
+    return {"status": "started", "message": "Preprocessing pipeline started", "started_at": PREPROCESSING_STATE["started_at"]}
+
+@app.get("/preprocessing/status")
+async def get_preprocessing_status():
+    """
+    Get the current status of the preprocessing pipeline.
+    No authentication required.
+    """
+    return {
+        "state": PREPROCESSING_STATE,
+        "preprocessing_available": check_preprocessing_available()
+    }
+
+@app.get("/preprocessing/results")
+async def get_preprocessing_results(current_user: dict = Depends(get_current_user)):
+    """
+    Get the preprocessing results.
+    Requires JWT authentication.
+    """
+    import os
+    import pandas as pd
+    
+    results_file = "reports/preprocessing_results.json"
+    summary_file = "reports/preprocessing_summary.txt"
+    missing_file = "reports/missing_values_report.csv"
+    
+    # Check if results file exists
+    if not os.path.exists(results_file):
+        return {"status": "no_results", "message": "Run preprocessing first"}
+    
+    # Read results JSON
+    with open(results_file, 'r') as f:
+        results = json.load(f)
+    
+    # Read summary if exists
+    summary = None
+    if os.path.exists(summary_file):
+        with open(summary_file, 'r') as f:
+            summary = f.read()
+    
+    # Read missing values CSV
+    missing_values = []
+    if os.path.exists(missing_file):
+        df_missing = pd.read_csv(missing_file)
+        missing_values = df_missing.to_dict('records')
+    
+    return {
+        "status": "success",
+        "results": results,
+        "summary": summary,
+        "missing_values": missing_values
+    }
+
+@app.get("/preprocessing/plots/{plot_name}")
+async def get_preprocessing_plot(plot_name: str):
+    """
+    Get a preprocessing plot image.
+    No authentication required.
+    """
+    valid_plots = ["class_distribution", "feature_distributions", "correlation_heatmap", "features_by_risk_label"]
+    
+    if plot_name not in valid_plots:
+        raise HTTPException(status_code=400, detail=f"Invalid plot name. Valid options: {', '.join(valid_plots)}")
+    
+    plot_file = f"plots/{plot_name}.png"
+    
+    if not os.path.exists(plot_file):
+        raise HTTPException(status_code=404, detail="Plot not found — run preprocessing first")
+    
+    return FileResponse(plot_file, media_type="image/png")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RUN INSTRUCTIONS

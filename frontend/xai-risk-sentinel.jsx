@@ -310,7 +310,7 @@ function LoginPage({ onLogin }) {
                       style={{padding:"15px 18px",borderRadius:14,cursor:"pointer",display:"flex",alignItems:"center",gap:16,
                         background:active?"linear-gradient(135deg,rgba(255,159,10,0.18),rgba(255,59,48,0.1))":isHover?"rgba(255,255,255,0.05)":"rgba(255,255,255,0.02)",
                         border:`1.5px solid ${active?"#FF9F0A":"rgba(255,255,255,0.08)"}`,
-                        boxShadow:active?"0 0 0 4px rgba(255,159,10,0.1)":"none",transition:"all 0.2s"}}>
+boxShadow:active?"0 0 0 4px rgba(255,159,10,0.1)":"none",transition:"all 0.2s"}}>
                       <div style={{width:44,height:44,borderRadius:12,flexShrink:0,background:active?"rgba(255,159,10,0.2)":"rgba(255,255,255,0.06)",border:`1px solid ${active?"rgba(255,159,10,0.4)":"rgba(255,255,255,0.1)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,transition:"all 0.2s"}}>
                         {role.icon}
                       </div>
