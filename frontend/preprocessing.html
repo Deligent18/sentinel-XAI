@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Preprocessing - XAI Risk Sentinel</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0A0A12;
+            --bg-secondary: #12121C;
+            --bg-tertiary: #1A1A26;
+            --bg-card: #161622;
+            --text-primary: #FFFFFF;
+            --text-secondary: #A0A0B0;
+            --text-muted: #6B6B7B;
+            --accent: #6366F1;
+            --accent-hover: #818CF8;
+            --accent-light: rgba(99, 102, 241, 0.15);
+            --success: #30D158;
+            --success-light: rgba(48, 209, 88, 0.15);
+            --warning: #FF9F0A;
+            --warning-light: rgba(255, 159, 10, 0.15);
+            --danger: #FF3B30;
+            --danger-light: rgba(255, 59, 48, 0.15);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.12);
+        }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            height: 100vh;
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent), #8B5CF6);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .logo-text {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 16px 12px;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 24px;
+        }
+
+        .nav-section-title {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 0 12px;
+            margin-bottom: 8px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--accent-light);
+            color: var(--accent);
+        }
+
+        .nav-item.active .nav-icon {
+            color: var(--accent);
+        }
+
+        .nav-icon {
+            font-size: 18px;
+            width: 24px;
+            text-align: center;
+        }
+
+        .sidebar-footer {
+            padding: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #6366F1, #8B5CF6);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .user-details {
+            flex: 1;
+        }
+
+        .user-name {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .user-role {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .logout-btn {
+            width: 100%;
+            padding: 12px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .logout-btn:hover {
+            background: var(--danger-light);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            margin-left: 260px;
+            padding: 32px;
+            max-width: calc(100vw - 260px);
+        }
+
+        .page-header {
+            margin-bottom: 32px;
+        }
+
+        .page-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+
+        .page-subtitle {
+            font-size: 15px;
+            color: var(--text-secondary);
+        }
+
+        /* Section A: Pipeline Control */
+        .control-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .control-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .run-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 28px;
+            background: var(--accent);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .run-btn:hover:not(:disabled) {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .run-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .run-btn .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+
+        .status-badge.idle .status-dot { background: var(--text-muted); }
+        .status-badge.running .status-dot { 
+            background: #3B82F6; 
+            animation: pulse 1.5s infinite;
+        }
+        .status-badge.complete .status-dot { background: var(--success); }
+        .status-badge.failed .status-dot { background: var(--danger); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Step Tracker */
+        .step-tracker {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 14px;
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .step-item.active {
+            border-color: var(--accent);
+            background: var(--accent-light);
+        }
+
+        .step-item.complete {
+            border-color: var(--success);
+            background: var(--success-light);
+        }
+
+        .step-item.failed {
+            border-color: var(--danger);
+            background: var(--danger-light);
+        }
+
+        .step-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--bg-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .step-item.active .step-number {
+            background: var(--accent);
+            color: white;
+        }
+
+        .step-item.active .step-number::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 2px solid var(--accent);
+            animation: ripple 1.5s infinite;
+        }
+
+        @keyframes ripple {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.8); opacity: 0; }
+        }
+
+        .step-item.complete .step-number {
+            background: var(--success);
+            color: white;
+        }
+
+        .step-item.failed .step-number {
+            background: var(--danger);
+            color: white;
+        }
+
+        .step-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-label {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .step-detail {
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Console Log */
+        .console-log {
+            background: #0D0D14;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            height: 180px;
+            overflow-y: auto;
+        }
+
+        .console-line {
+            display: flex;
+            gap: 12px;
+            padding: 4px 0;
+            color: var(--text-secondary);
+        }
+
+        .console-time {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .console-message {
+            word-break: break-word;
+        }
+
+        /* Section B: Dataset Overview Cards */
+        .results-section {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .results-section.visible {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s;
+        }
+
+        .stat-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-2px);
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .stat-badge {
+            display: inline-block;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        /* Section C: Class Distribution Chart */
+        .chart-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+
+        .chart-wrapper {
+            height: 300px;
+            position: relative;
+        }
+
+        .imbalance-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 16px;
+            padding: 10px 16px;
+            background: var(--warning-light);
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--warning);
+        }
+
+        /* Section D: Missing Values Table */
+        .table-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 32px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 14px 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .data-table th:hover {
+            color: var(--text-primary);
+        }
+
+        .data-table td {
+            padding: 14px 20px;
+            font-size: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .table-row-warning {
+            border-left: 3px solid var(--warning);
+        }
+
+        .missing-ok {
+            color: var(--success);
+        }
+
+        /* Section E: Plots Grid */
+        .plots-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        @media (max-width: 1200px) {
+            .plots-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .plot-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .plot-card:hover {
+            border-color: var(--accent);
+            transform: scale(1.01);
+        }
+
+        .plot-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .plot-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .plot-image {
+            width: 100%;
+            height: 200px;
+            object-fit: contain;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .plot-skeleton {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-secondary) 50%, var(--bg-tertiary) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Section F: Validation Checks */
+        .validation-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+
+        .validation-banner {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .validation-banner.success {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .validation-banner.error {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        .validation-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .validation-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .validation-name {
+            font-size: 14px;
+        }
+
+        .validation-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .validation-status.pass {
+            color: var(--success);
+        }
+
+        .validation-status.fail {
+            color: var(--danger);
+        }
+
+        /* Lightbox Modal */
+        .lightbox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .lightbox.visible {
+            display: flex;
+        }
+
+        .lightbox-content {
+            max-width: 90vw;
+            max-height: 90vh;
+            position: relative;
+        }
+
+        .lightbox-image {
+            max-width: 100%;
+            max-height: 85vh;
+            border-radius: 8px;
+        }
+
+        .lightbox-close {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            padding: 8px;
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .toast {
+            padding: 14px 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+            animation: slideIn 0.3s ease;
+            max-width: 360px;
+        }
+
+        .toast.error {
+            border-color: var(--danger);
+        }
+
+        .toast.success {
+            border-color: var(--success);
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .main-content {
+                margin-left: 0;
+                max-width: 100vw;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">🛡️</div>
+                <div>
+                    <div class="logo-text">XAI Risk</div>
+                    <div class="logo-sub">Sentinel</div>
+                </div>
+            </div>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">Main</div>
+                <a href="index.html" class="nav-item">
+                    <span class="nav-icon">📊</span>
+                    Dashboard
+                </a>
+                <a href="preprocessing.html" class="nav-item active">
+                    <span class="nav-icon">⚙️</span>
+                    Data Preprocessing
+                </a>
+                <a href="students.html" class="nav-item">
+                    <span class="nav-icon">👥</span>
+                    Students
+                </a>
+                <a href="interventions.html" class="nav-item">
+                    <span class="nav-icon">💊</span>
+                    Interventions
+                </a>
+            </div>
+            
+            <div class="nav-section">
+                <div class="nav-section-title">Analytics</div>
+                <a href="predictions.html" class="nav-item">
+                    <span class="nav-icon">🔮</span>
+                    Predictions
+                </a>
+                <a href="reports.html" class="nav-item">
+                    <span class="nav-icon">📈</span>
+                    Reports
+                </a>
+            </div>
+            
+            <div class="nav-section">
+                <div class="nav-section-title">System</div>
+                <a href="audit-logs.html" class="nav-item">
+                    <span class="nav-icon">📋</span>
+                    Audit Logs
+                </a>
+                <a href="settings.html" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    Settings
+                </a>
+            </div>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar">DS</div>
+                <div class="user-details">
+                    <div class="user-name" id="userName">Dr. Sibanda</div>
+                    <div class="user-role" id="userRole">Counsellor</div>
+                </div>
+            </div>
+            <button class="logout-btn" onclick="logout()">
+                <span>🚪</span> Logout
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="page-header">
+            <h1 class="page-title">Data Preprocessing Pipeline</h1>
+            <p class="page-subtitle">Prepare and validate data for model training</p>
+        </div>
+
+        <!-- Section A: Pipeline Control Panel -->
+        <div class="control-panel">
+            <div class="control-header">
+                <button class="run-btn" id="runBtn" onclick="runPreprocessing()">
+                    <span>▶</span>
+                    <span id="runBtnText">Run Preprocessing Pipeline</span>
+                </button>
+                <div class="status-badge idle" id="statusBadge">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Idle</span>
+                </div>
+            </div>
+
+            <!-- Step Tracker -->
+            <div class="step-tracker" id="stepTracker">
+                <div class="step-item" data-step="1">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <div class="step-label">ETL — Data Integration</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="2">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <div class="step-label">Data Cleaning</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="3">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <div class="step-label">Exploratory Data Analysis</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="4">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <div class="step-label">Feature Engineering</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="5">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <div class="step-label">Categorical Encoding</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="6">
+                    <div class="step-number">6</div>
+                    <div class="step-content">
+                        <div class="step-label">Feature Scaling</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="7">
+                    <div class="step-number">7</div>
+                    <div class="step-content">
+                        <div class="step-label">SMOTE — Class Balancing</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="8">
+                    <div class="step-number">8</div>
+                    <div class="step-content">
+                        <div class="step-label">Train/Val/Test Split</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="9">
+                    <div class="step-number">9</div>
+                    <div class="step-content">
+                        <div class="step-label">Save Datasets</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="10">
+                    <div class="step-number">10</div>
+                    <div class="step-content">
+                        <div class="step-label">Validation Checks</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+                <div class="step-item" data-step="11">
+                    <div class="step-number">11</div>
+                    <div class="step-content">
+                        <div class="step-label">Summary Report</div>
+                        <div class="step-detail">Waiting...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Console Log -->
+            <div class="console-log" id="consoleLog">
+                <div class="console-line">
+                    <span class="console-time">[00:00:00]</span>
+                    <span class="console-message">Ready to run preprocessing pipeline. Click "Run Preprocessing Pipeline" to begin.</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section (hidden until preprocessing completes) -->
+        <div class="results-section" id="resultsSection">
+            <!-- Section B: Dataset Overview Cards -->
+            <h2 class="section-title">Dataset Overview</h2>
+            <div class="cards-grid" id="cardsGrid">
+                <div class="stat-card">
+                    <div class="stat-label">Raw Records Merged</div>
+                    <div class="stat-value" id="rawRecords">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Records After Cleaning</div>
+                    <div class="stat-value" id="cleanRecords">—</div>
+                    <span class="stat-badge" id="droppedBadge">—</span>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Model Features</div>
+                    <div class="stat-value" id="totalFeatures">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Training Samples (post-SMOTE)</div>
+                    <div class="stat-value" id="trainSamples">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Validation Samples</div>
+                    <div class="stat-value" id="valSamples">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Test Samples</div>
+                    <div class="stat-value" id="testSamples">—</div>
+                </div>
+            </div>
+
+            <!-- Section C: Class Distribution Chart -->
+            <h2 class="section-title">Class Distribution</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="classChart"></canvas>
+                </div>
+                <div class="imbalance-badge" id="imbalanceBadge" style="display: none;">
+                    ⚠ <span id="imbalanceRatio">—</span>
+                </div>
+            </div>
+
+            <!-- Section D: Missing Values Table -->
+            <h2 class="section-title">Missing Values & Outliers</h2>
+            <div class="table-container">
+                <table class="data-table" id="missingTable">
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th>Missing Count</th>
+                            <th>Missing %</th>
+                            <th>Outliers Capped</th>
+                        </tr>
+                    </thead>
+                    <tbody id="missingTableBody">
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: var(--text-muted);">Run preprocessing to view data</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Section E: Plots Viewer -->
+            <h2 class="section-title">Preprocessing Plots</h2>
+            <div class="plots-grid" id="plotsGrid">
+                <div class="plot-card" onclick="openLightbox('class_distribution')">
+                    <div class="plot-title">Class Distribution</div>
+                    <div class="plot-desc">Distribution of risk labels before and after SMOTE</div>
+                    <div class="plot-skeleton" id="plot-class_distribution"></div>
+                </div>
+                <div class="plot-card" onclick="openLightbox('feature_distributions')">
+                    <div class="plot-title">Feature Distributions</div>
+                    <div class="plot-desc">Histogram of key numerical features</div>
+                    <div class="plot-skeleton" id="plot-feature_distributions"></div>
+                </div>
+                <div class="plot-card" onclick="openLightbox('correlation_heatmap')">
+                    <div class="plot-title">Correlation Heatmap</div>
+                    <div class="plot-desc">Feature correlation matrix</div>
+                    <div class="plot-skeleton" id="plot-correlation_heatmap"></div>
+                </div>
+                <div class="plot-card" onclick="openLightbox('features_by_risk_label')">
+                    <div class="plot-title">Features by Risk Label</div>
+                    <div class="plot-desc">Boxplots of key features across risk categories</div>
+                    <div class="plot-skeleton" id="plot-features_by_risk_label"></div>
+                </div>
+            </div>
+
+            <!-- Section F: Validation Checks -->
+            <h2 class="section-title">Validation Checks</h2>
+            <div class="validation-panel">
+                <div class="validation-banner" id="validationBanner" style="display: none;">
+                    ✓ <span id="validationMessage">All validation checks passed</span>
+                </div>
+                <div class="validation-list" id="validationList">
+                    <!-- Validation items will be populated here -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Lightbox Modal -->
+    <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+        <div class="lightbox-content">
+            <button class="lightbox-close" onclick="closeLightbox()">×</button>
+            <img class="lightbox-image" id="lightboxImage" src="" alt="Plot">
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="preprocessing.js"></script>
+</body>
+</html>
+
