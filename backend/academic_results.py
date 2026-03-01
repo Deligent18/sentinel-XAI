@@ -5,7 +5,7 @@ with class average GPA for each semester
 """
 
 import random
-from typing import Dict, List, Option
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 # Zimbabwean names for generating mock students
@@ -36,7 +36,7 @@ LAST_NAMES = [
 TARGET_STUDENT_COUNT = 88
 
 
-def generate_mock_students(count: int, programme: str) -> typing.List[typing.Dict]:
+def generate_mock_students(count: int, programme: str) -> List[Dict]:
     """
     Generate mock students with realistic data for the programme.
     """
@@ -81,7 +81,7 @@ def generate_mock_students(count: int, programme: str) -> typing.List[typing.Dic
     return mock_students
 
 
-def get_students_by_programme(students: typing.List[typing.Dict], programme: str) -> typing.List[typing.Dict]:
+def get_students_by_programme(students: List[Dict], programme: str) -> List[Dict]:
     """
     Filter students by programme name (case-insensitive partial match)
     """
@@ -92,7 +92,7 @@ def get_students_by_programme(students: typing.List[typing.Dict], programme: str
     ]
 
 
-def generate_8_semester_gpa(student: typing.Dict) -> typing.List[float]:
+def generate_8_semester_gpa(student: Dict) -> List[float]:
     """
     Generate 8 semesters of GPA data for a student.
     Uses existing GPA data if available, then simulates remaining semesters
@@ -131,7 +131,7 @@ def generate_8_semester_gpa(student: typing.Dict) -> typing.List[float]:
     return gpa_list[:8]
 
 
-def calculate_semester_class_averages(students: typing.List[typing.Dict]) -> typing.List[typing.Dict[str, typing.Any]]:
+def calculate_semester_class_averages(students: List[Dict]) -> List[Dict[str, Any]]:
     """
     Calculate class average GPA for each of the 8 semesters.
     Returns list of semester objects with semester number and average GPA.
@@ -162,7 +162,7 @@ def calculate_semester_class_averages(students: typing.List[typing.Dict]) -> typ
     return semester_data
 
 
-def get_academic_results(students: typing.List[typing.Dict], programme: str, target_count: int = TARGET_STUDENT_COUNT) -> typing.Dict[str, typing.Any]:
+def get_academic_results(students: List[Dict], programme: str, target_count: int = TARGET_STUDENT_COUNT) -> Dict[str, Any]:
     """
     Generate comprehensive academic results for a programme.
     
@@ -237,3 +237,10 @@ def get_academic_results(students: typing.List[typing.Dict], programme: str, tar
             {
                 "id": s['id'],
                 "name": s['name'],
+                "gpa": s.get('gpa', []),
+                "year": s.get('year', 1),
+                "gpa_8_sem": s.get('gpa_8_sem', [])
+            }
+            for s in programme_students
+        ]
+    }

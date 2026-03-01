@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import api, { logout as apiLogout, wsManager } from "./src/api.js";
 
-// ── Auth users ────────────────────────────────────────────────────────────────
+// ── Auth users (fallback only - API primary) ───────────────────────────────────
 const USERS = [
   { username: "counsellor1",  password: "Care@2026",    name: "Dr. Sibanda, N.",  role: "counsellor", roleLabel: "Mental Health Counsellor" },
   { username: "welfare1",     password: "Welfare@2026", name: "Ms. Choto, R.",    role: "welfare",    roleLabel: "Student Welfare Officer"  },
@@ -16,8 +17,8 @@ const ROLES = [
     desc: "Manage user accounts, audit logs, model settings and system configuration." },
 ];
 
-// ── Student data ──────────────────────────────────────────────────────────────
-const STUDENTS = [
+// ── Fallback data (used if API unavailable) ───────────────────────────────────
+const FALLBACK_STUDENTS = [
   {
     id: "N00411234", name: "Tinashe Moyo", programme: "BSc Computer Science", year: 3,
     risk: 0.87, tier: "high",
@@ -102,7 +103,7 @@ const TIER = {
   low:    { label:"Low Risk",    bg:"#30D158", light:"rgba(48,209,88,0.12)",  ring:"#30D158" },
 };
 
-const AUDIT_LOGS = [
+const FALLBACK_AUDIT_LOGS = [
   { time:"06:12", user:"counsellor1", action:"Viewed risk profile", target:"N00849023", level:"high"   },
   { time:"06:08", user:"welfare1",    action:"Logged intervention",  target:"N00411234", level:"high"   },
   { time:"05:55", user:"counsellor1", action:"Exported report",      target:"N00523891", level:"medium" },
@@ -111,7 +112,7 @@ const AUDIT_LOGS = [
   { time:"03:15", user:"counsellor1", action:"Alert acknowledged",    target:"N00849023", level:"high"   },
 ];
 
-const SYSTEM_USERS = [
+const FALLBACK_SYSTEM_USERS = [
   { name:"Dr. Sibanda, N.",  username:"counsellor1", role:"counsellor", status:"Active",   last:"Today 06:12" },
   { name:"Ms. Choto, R.",    username:"welfare1",    role:"welfare",    status:"Active",   last:"Today 06:08" },
   { name:"Mr. Dube, T.",     username:"admin",       role:"admin",      status:"Active",   last:"Today 05:40" },
@@ -171,7 +172,7 @@ function ShapBar({ feature, value, dir, maxVal }) {
 }
 
 function StudentCard({ student, selected, onClick }) {
-  const cfg = TIER[student.tier];
+  const cfg = TIER[student.tier] || TIER.low;
   return (
     <div onClick={onClick} style={{
       padding:"14px 18px",marginBottom:8,borderRadius:12,cursor:"pointer",
@@ -186,7 +187,7 @@ function StudentCard({ student, selected, onClick }) {
           <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",fontFamily:"'DM Sans',sans-serif"}}>{student.id} · Year {student.year}</div>
         </div>
         <div style={{fontSize:16,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",color:cfg.bg,minWidth:42,textAlign:"right"}}>
-          {Math.round(student.risk*100)}%
+          {Math.round((student.risk || 0)*100)}%
         </div>
       </div>
     </div>
@@ -238,20 +239,49 @@ function LoginPage({ onLogin }) {
   const [error, setError]       = useState("");
   const [loading, setLoading]   = useState(false);
   const [hovered, setHovered]   = useState(null);
+  const [apiError, setApiError] = useState("");
 
   function nextStep() {
     if (!selectedRole) { setError("Please select your role to continue."); return; }
     setError(""); setStep("credentials");
   }
 
-  function handleLogin() {
+  async function handleLogin() {
     if (!username.trim() || !password) { setError("Please enter your username and password."); return; }
-    setLoading(true); setError("");
-    setTimeout(() => {
-      const match = USERS.find(u => u.username===username.trim() && u.password===password && u.role===selectedRole);
-      if (match) { onLogin(match); }
-      else { setError("Incorrect username or password for the selected role."); setLoading(false); }
-    }, 900);
+    setLoading(true); setError(""); setApiError("");
+    
+    try {
+      // Try API login first
+      const result = await api.login(username.trim(), password, selectedRole);
+      
+      if (result.success) {
+        // Find user info for display
+        const userInfo = USERS.find(u => u.username === username.trim() && u.role === selectedRole);
+        onLogin(userInfo || { username, role: selectedRole, name: username, roleLabel: ROLES.find(r => r.id === selectedRole)?.label || selectedRole });
+      } else {
+        // Fallback to local check
+        const match = USERS.find(u => u.username === username.trim() && u.password === password && u.role === selectedRole);
+        if (match) {
+          onLogin(match);
+        } else {
+          setError(result.error || "Incorrect username or password for the selected role.");
+        }
+      }
+    } catch (err) {
+      // Fallback to local authentication
+      const match = USERS.find(u => u.username === username.trim() && u.password === password && u.role === selectedRole);
+      if (match) {
+        onLogin(match);
+      } else {
+        setError("Unable to connect to server. Using offline authentication.");
+        if (match) {
+          onLogin(match);
+        } else {
+          setError("Incorrect username or password for the selected role.");
+        }
+      }
+    }
+    setLoading(false);
   }
 
   const roleInfo = ROLES.find(r => r.id===selectedRole);
@@ -338,7 +368,7 @@ boxShadow:active?"0 0 0 4px rgba(255,159,10,0.1)":"none",transition:"all 0.2s"}}
             <div>
               <div style={{display:"inline-flex",alignItems:"center",gap:8,padding:"7px 14px",borderRadius:20,background:"rgba(255,159,10,0.12)",border:"1px solid rgba(255,159,10,0.3)",marginBottom:22}}>
                 <span style={{fontSize:16}}>{roleInfo?.icon}</span>
-                <span style={{fontSize:12,color:"#FF9F0A",fontWeight:600,fontFamily:"'DM Sans',sans-serif"}}>{roleInfo?.label}</span>
+                <span style={{fontSize:12,color:"#FF9F0A",fontFamily:"'DM Sans',sans-serif"}}>{roleInfo?.label}</span>
                 <button onClick={()=>{setStep("role");setError("");setUsername("");setPassword("");}} style={{background:"none",border:"none",color:"rgba(255,255,255,0.35)",cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",paddingLeft:4}}>
                   ✕ Change
                 </button>
@@ -355,7 +385,7 @@ boxShadow:active?"0 0 0 4px rgba(255,159,10,0.1)":"none",transition:"all 0.2s"}}
                   </svg>
                   <input value={username} onChange={e=>{setUsername(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handleLogin()} placeholder="Enter username"
                     style={{width:"100%",padding:"12px 14px 12px 40px",borderRadius:12,background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:14,fontFamily:"'DM Sans',sans-serif",outline:"none"}}
-                    onFocus={e=>e.target.style.borderColor="rgba(255,159,10,0.5)"} onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.1)"}/>
+                    onFocus={e=>e.target.style.borderColor="rgba(255,159,10,0.5)"} onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.1)"} />
                 </div>
               </div>
 
@@ -368,7 +398,7 @@ boxShadow:active?"0 0 0 4px rgba(255,159,10,0.1)":"none",transition:"all 0.2s"}}
                   </svg>
                   <input type={showPwd?"text":"password"} value={password} onChange={e=>{setPassword(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handleLogin()} placeholder="Enter password"
                     style={{width:"100%",padding:"12px 44px 12px 40px",borderRadius:12,background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.1)",color:"#fff",fontSize:14,fontFamily:"'DM Sans',sans-serif",outline:"none"}}
-                    onFocus={e=>e.target.style.borderColor="rgba(255,159,10,0.5)"} onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.1)"}/>
+                    onFocus={e=>e.target.style.borderColor="rgba(255,159,10,0.5)"} onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.1)"} />
                   <button onClick={()=>setShowPwd(!showPwd)} style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.35)",fontSize:11,fontFamily:"'DM Sans',sans-serif"}}>
                     {showPwd?"Hide":"Show"}
                   </button>
@@ -403,7 +433,44 @@ boxShadow:active?"0 0 0 4px rgba(255,159,10,0.1)":"none",transition:"all 0.2s"}}
 
 // ── Admin Dashboard ───────────────────────────────────────────────────────────
 function AdminDashboard({ user, onLogout }) {
-  const counts = {high:STUDENTS.filter(s=>s.tier==="high").length,medium:STUDENTS.filter(s=>s.tier==="medium").length,low:STUDENTS.filter(s=>s.tier==="low").length};
+  const [stats, setStats] = useState(null);
+  const [systemUsers, setSystemUsers] = useState(FALLBACK_SYSTEM_USERS);
+  const [auditLogs, setAuditLogs] = useState(FALLBACK_AUDIT_LOGS);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        // Fetch stats from API
+        const statsResult = await api.fetchStats();
+        if (statsResult.success) {
+          setStats(statsResult.stats);
+        }
+        
+        // Fetch users from API
+        const usersResult = await api.fetchUsers();
+        if (usersResult.success) {
+          setSystemUsers(usersResult.users);
+        }
+        
+        // Fetch audit logs from API
+        const logsResult = await api.fetchAuditLogs();
+        if (logsResult.success) {
+          setAuditLogs(logsResult.logs);
+        }
+      } catch (error) {
+        console.error("Error loading admin data:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    loadData();
+  }, []);
+
+  const counts = stats?.riskCounts || {high:0, medium:0, low:0};
+  const totalStudents = stats?.totalStudents || 0;
+
   return (
     <div style={{minHeight:"100vh",background:"#0A0A12",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{GLOBAL_CSS}</style>
@@ -412,10 +479,10 @@ function AdminDashboard({ user, onLogout }) {
       <div style={{padding:"26px 30px",maxWidth:1100,margin:"0 auto"}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:26}}>
           {[
-            {label:"Students Monitored",value:STUDENTS.length,color:"#fff"},
+            {label:"Students Monitored",value:totalStudents,color:"#fff"},
             {label:"High Risk Alerts",  value:counts.high,    color:"#FF3B30"},
-            {label:"Active Users",      value:3,              color:"#30D158"},
-            {label:"Model AUC-ROC",     value:"0.88",         color:"#FF9F0A"},
+            {label:"Active Users",      value:stats?.activeUsers || 3,              color:"#30D158"},
+            {label:"Model AUC-ROC",     value:stats?.modelInfo?.auc_roc || "0.88",         color:"#FF9F0A"},
           ].map(s=>(
             <div key={s.label} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"18px 20px"}}>
               <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>{s.label}</div>
@@ -427,7 +494,7 @@ function AdminDashboard({ user, onLogout }) {
         <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:16}}>
           <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:22}}>
             <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:16}}>User Management</div>
-            {SYSTEM_USERS.map(u=>(
+            {systemUsers.map(u=>(
               <div key={u.username} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
                 <div style={{width:36,height:36,borderRadius:10,background:"rgba(255,255,255,0.07)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.6)",fontFamily:"'Barlow Condensed',sans-serif"}}>
                   {u.name.split(" ").map(n=>n[0]).join("").slice(0,2)}
@@ -447,7 +514,7 @@ function AdminDashboard({ user, onLogout }) {
 
           <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:22}}>
             <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:16}}>Recent Audit Log</div>
-            {AUDIT_LOGS.map((log,i)=>(
+            {auditLogs.map((log,i)=>(
               <div key={i} style={{display:"flex",gap:12,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.05)",alignItems:"flex-start"}}>
                 <div style={{fontSize:11,color:"rgba(255,255,255,0.3)",fontFamily:"'Barlow Condensed',sans-serif",minWidth:36,marginTop:1}}>{log.time}</div>
                 <div style={{flex:1}}>
@@ -461,7 +528,7 @@ function AdminDashboard({ user, onLogout }) {
         </div>
 
         <div style={{marginTop:16,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:"14px 20px",display:"flex",gap:32,flexWrap:"wrap"}}>
-          {[["Model","XGBoost v2.1"],["Last Trained","22 Feb 2026"],["SHAP","v0.46"],["Next Retrain","01 Mar 2026"],["Records","1,000 students"],["Status","✓ Healthy"]].map(([k,v])=>(
+          {[["Model",stats?.modelInfo?.model || "XGBoost v2.1"],["Last Trained",stats?.modelInfo?.lastTrained || "22 Feb 2026"],["SHAP",stats?.modelInfo?.shap || "v0.46"],["Next Retrain","01 Mar 2026"],["Records",`${totalStudents} students`],["Status","✓ Healthy"]].map(([k,v])=>(
             <div key={k}><div style={{fontSize:10,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",letterSpacing:1}}>{k}</div><div style={{fontSize:13,fontWeight:600,color:"rgba(255,255,255,0.8)",marginTop:2}}>{v}</div></div>
           ))}
         </div>
@@ -472,21 +539,94 @@ function AdminDashboard({ user, onLogout }) {
 
 // ── Counsellor / Welfare Dashboard ────────────────────────────────────────────
 function ClinicalDashboard({ user, onLogout }) {
-  const [selected, setSelected] = useState(STUDENTS[4]);
-  const [filter, setFilter]     = useState("all");
+  const [students, setStudents] = useState(FALLBACK_STUDENTS);
+  const [selected, setSelected] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
 
-  const filtered = STUDENTS.filter(s=>filter==="all"||s.tier===filter).sort((a,b)=>b.risk-a.risk);
-  const cfg      = TIER[selected.tier];
-  const maxShap  = Math.max(...selected.shap.map(s=>Math.abs(s.value)));
-  const counts   = {high:STUDENTS.filter(s=>s.tier==="high").length,medium:STUDENTS.filter(s=>s.tier==="medium").length,low:STUDENTS.filter(s=>s.tier==="low").length};
+  // Load students from API
+  useEffect(() => {
+    async function loadStudents() {
+      try {
+        const result = await api.fetchStudents();
+        if (result.success && result.students.length > 0) {
+          setStudents(result.students);
+          setSelected(result.students[0]);
+        } else {
+          // Use fallback data
+          setSelected(FALLBACK_STUDENTS[0]);
+        }
+      } catch (error) {
+        console.error("Error loading students:", error);
+        // Use fallback data
+        setSelected(FALLBACK_STUDENTS[0]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    loadStudents();
+    
+    // Connect to WebSocket for real-time updates
+    wsManager.connect();
+    
+    wsManager.on('student_update', (updatedStudent) => {
+      setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
+      if (selected?.id === updatedStudent.id) {
+        setSelected(updatedStudent);
+      }
+    });
+    
+    wsManager.on('pipeline_completed', () => {
+      // Reload students after pipeline completes
+      loadStudents();
+    });
+    
+    return () => {
+      wsManager.disconnect();
+    };
+  }, []);
+
+  // Set initial selected student when students change
+  useEffect(() => {
+    if (!loading && students.length > 0 && !selected) {
+      setSelected(students[0]);
+    }
+  }, [loading, students, selected]);
+
+  const filtered = students.filter(s => filter === "all" || s.tier === filter).sort((a, b) => (b.risk || 0) - (a.risk || 0));
+  const cfg = selected ? (TIER[selected.tier] || TIER.low) : TIER.low;
+  const maxShap = selected?.shap ? Math.max(...selected.shap.map(s => Math.abs(s.value))) : 1;
+  const counts = {
+    high: students.filter(s => s.tier === "high").length,
+    medium: students.filter(s => s.tier === "medium").length,
+    low: students.filter(s => s.tier === "low").length
+  };
+
+  const handleLogout = () => {
+    apiLogout();
+    onLogout();
+  };
+
+  if (loading) {
+    return (
+      <div style={{minHeight:"100vh",background:"#0A0A12",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <style>{GLOBAL_CSS}</style>
+        <div style={{textAlign:"center"}}>
+          <div style={{width:48,height:48,border:"3px solid rgba(255,255,255,0.1)",borderTopColor:"#FF9F0A",borderRadius:"50%",animation:"spin 1s linear infinite",margin:"0 auto 16px"}}/>
+          <div style={{color:"rgba(255,255,255,0.5)",fontFamily:"'DM Sans',sans-serif",fontSize:14}}>Loading student data...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{minHeight:"100vh",background:"#0A0A12",fontFamily:"'DM Sans',sans-serif",display:"flex",flexDirection:"column"}}>
       <style>{GLOBAL_CSS}</style>
-      <AppHeader user={user} onLogout={onLogout} alertCount={counts.high}/>
+      <AppHeader user={user} onLogout={handleLogout} alertCount={counts.high}/>
 
       <div style={{background:"rgba(255,255,255,0.02)",borderBottom:"1px solid rgba(255,255,255,0.05)",padding:"10px 28px",display:"flex",gap:8,alignItems:"center"}}>
-        {[{key:"all",label:"All Students",count:STUDENTS.length,color:"rgba(255,255,255,0.6)"},{key:"high",label:"High Risk",count:counts.high,color:"#FF3B30"},{key:"medium",label:"Medium Risk",count:counts.medium,color:"#FF9F0A"},{key:"low",label:"Low Risk",count:counts.low,color:"#30D158"}].map(f=>(
+        {[{key:"all",label:"All Students",count:students.length,color:"rgba(255,255,255,0.6)"},{key:"high",label:"High Risk",count:counts.high,color:"#FF3B30"},{key:"medium",label:"Medium Risk",count:counts.medium,color:"#FF9F0A"},{key:"low",label:"Low Risk",count:counts.low,color:"#30D158"}].map(f=>(
           <button key={f.key} onClick={()=>setFilter(f.key)} style={{padding:"6px 16px",borderRadius:20,border:"1px solid",borderColor:filter===f.key?f.color:"rgba(255,255,255,0.1)",background:filter===f.key?`${f.color}22`:"transparent",color:filter===f.key?f.color:"rgba(255,255,255,0.4)",fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.2s",fontFamily:"'DM Sans',sans-serif"}}>
             {f.label} <span style={{opacity:0.7}}>({f.count})</span>
           </button>
@@ -501,97 +641,101 @@ function ClinicalDashboard({ user, onLogout }) {
       <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 108px)"}}>
         <div style={{width:290,flexShrink:0,borderRight:"1px solid rgba(255,255,255,0.06)",overflowY:"auto",padding:"16px 14px"}}>
           {filtered.map(s=>(
-            <StudentCard key={s.id} student={s} selected={selected.id===s.id} onClick={()=>setSelected(s)}/>
+            <StudentCard key={s.id} student={s} selected={selected?.id === s.id} onClick={() => setSelected(s)}/>
           ))}
         </div>
 
-        <div style={{flex:1,overflowY:"auto",padding:"24px 28px"}} key={selected.id}>
-          <div style={{animation:"slideIn 0.3s ease"}}>
+        {selected && (
+          <div style={{flex:1,overflowY:"auto",padding:"24px 28px"}} key={selected.id}>
+            <div style={{animation:"slideIn 0.3s ease"}}>
 
-            <div style={{display:"flex",alignItems:"flex-start",gap:24,marginBottom:24}}>
-              <div style={{width:56,height:56,borderRadius:16,background:`linear-gradient(135deg,${cfg.bg}44,${cfg.bg}11)`,border:`1px solid ${cfg.bg}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:800,color:cfg.bg,flexShrink:0,fontFamily:"'Barlow Condensed',sans-serif"}}>
-                {selected.name.split(" ").map(n=>n[0]).join("")}
-              </div>
-              <div style={{flex:1}}>
-                <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                  <h2 style={{fontSize:22,fontWeight:700,color:"#fff",fontFamily:"'Barlow Condensed',sans-serif"}}>{selected.name}</h2>
-                  <span style={{padding:"3px 12px",borderRadius:20,fontSize:11,fontWeight:700,background:cfg.light,color:cfg.bg,border:`1px solid ${cfg.bg}44`,letterSpacing:0.5,textTransform:"uppercase"}}>{cfg.label}</span>
+              <div style={{display:"flex",alignItems:"flex-start",gap:24,marginBottom:24}}>
+                <div style={{width:56,height:56,borderRadius:16,background:`linear-gradient(135deg,${cfg.bg}44,${cfg.bg}11)`,border:`1px solid ${cfg.bg}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:800,color:cfg.bg,flexShrink:0,fontFamily:"'Barlow Condensed',sans-serif"}}>
+                  {selected.name.split(" ").map(n=>n[0]).join("")}
                 </div>
-                <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginTop:4}}>{selected.id} · {selected.programme} · Year {selected.year}</div>
-              </div>
-              <RiskGauge value={selected.risk}/>
-            </div>
-
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
-              {[
-                {label:"Current GPA",   value:selected.gpa[selected.gpa.length-1].toFixed(1),sub:`Was ${selected.gpa[0].toFixed(1)}`,       warn:selected.gpa[selected.gpa.length-1]<2.5},
-                {label:"Attendance",    value:`${selected.attendance}%`,                       sub:selected.attendance<60?"Critical":selected.attendance<75?"Below threshold":"Acceptable",warn:selected.attendance<75},
-                {label:"LMS Logins/wk",value:selected.lmsLogins,                              sub:"This week",                                warn:selected.lmsLogins<5},
-              ].map(c=>(
-                <div key={c.label} style={{background:c.warn?"rgba(255,59,48,0.07)":"rgba(255,255,255,0.04)",border:`1px solid ${c.warn?"rgba(255,59,48,0.25)":"rgba(255,255,255,0.07)"}`,borderRadius:12,padding:"16px 18px"}}>
-                  <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{c.label}</div>
-                  <div style={{fontSize:26,fontWeight:800,color:c.warn?"#FF3B30":"#fff",fontFamily:"'Barlow Condensed',sans-serif"}}>{c.value}</div>
-                  <div style={{fontSize:11,color:c.warn?"rgba(255,59,48,0.7)":"rgba(255,255,255,0.35)",marginTop:2}}>{c.sub}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
-              <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:20}}>
-                <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:16}}>
-                  {user.role==="counsellor"?"SHAP Feature Contributions":"Top Risk Factors"}
-                </div>
-                {(user.role==="counsellor"?selected.shap:selected.shap.filter(s=>s.dir>0).slice(0,3)).map((s,i)=>(
-                  <ShapBar key={i} {...s} maxVal={maxShap}/>
-                ))}
-                {user.role==="welfare"&&<div style={{fontSize:11,color:"rgba(255,255,255,0.25)",marginTop:10,fontStyle:"italic"}}>Full SHAP values available to Mental Health Counsellors only.</div>}
-              </div>
-
-              <div style={{display:"flex",flexDirection:"column",gap:16}}>
-                <div style={{background:`linear-gradient(135deg,${cfg.bg}0A,rgba(255,255,255,0.02))`,border:`1px solid ${cfg.bg}25`,borderRadius:14,padding:20}}>
-                  <div style={{fontSize:12,fontWeight:700,color:cfg.bg,textTransform:"uppercase",letterSpacing:1.5,marginBottom:12}}>XAI Explanation</div>
-                  <p style={{fontSize:13,color:"rgba(255,255,255,0.75)",lineHeight:1.65}}>{selected.explanation}</p>
-                </div>
-                <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:20}}>
-                  <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:12}}>
-                    {user.role==="counsellor"?"Clinical Recommendations":"Welfare Actions"}
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                    <h2 style={{fontSize:22,fontWeight:700,color:"#fff",fontFamily:"'Barlow Condensed',sans-serif"}}>{selected.name}</h2>
+                    <span style={{padding:"3px 12px",borderRadius:20,fontSize:11,fontWeight:700,background:cfg.light,color:cfg.bg,border:`1px solid ${cfg.bg}44`,letterSpacing:0.5,textTransform:"uppercase"}}>{cfg.label}</span>
                   </div>
-                  {selected.intervention.map((action,i)=>(
-                    <div key={i} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
-                      <div style={{width:20,height:20,borderRadius:6,flexShrink:0,background:i===0&&selected.tier==="high"?"rgba(255,59,48,0.2)":"rgba(255,255,255,0.07)",border:`1px solid ${i===0&&selected.tier==="high"?"rgba(255,59,48,0.4)":"rgba(255,255,255,0.1)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:i===0&&selected.tier==="high"?"#FF3B30":"rgba(255,255,255,0.4)"}}>
-                        {i+1}
-                      </div>
-                      <span style={{fontSize:12,color:"rgba(255,255,255,0.7)",lineHeight:1.5,flex:1}}>{action}</span>
-                    </div>
+                  <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginTop:4}}>{selected.id} · {selected.programme} · Year {selected.year}</div>
+                </div>
+                <RiskGauge value={selected.risk || 0}/>
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+                {[
+                  {label:"Current GPA",   value:selected.gpa && selected.gpa.length > 0 ? selected.gpa[selected.gpa.length-1].toFixed(1) : "N/A",sub:selected.gpa && selected.gpa.length > 1 ? `Was ${selected.gpa[0].toFixed(1)}` : "",warn:selected.gpa && selected.gpa.length > 0 && selected.gpa[selected.gpa.length-1] < 2.5},
+                  {label:"Attendance",    value:`${selected.attendance || 0}%`,                       sub:(selected.attendance || 0) < 60 ? "Critical" : (selected.attendance || 0) < 75 ? "Below threshold" : "Acceptable",warn:(selected.attendance || 0) < 75},
+                  {label:"LMS Logins/wk",value:selected.lmsLogins || 0,                              sub:"This week",                                warn:(selected.lmsLogins || 0) < 5},
+                ].map(c=>(
+                  <div key={c.label} style={{background:c.warn?"rgba(255,59,48,0.07)":"rgba(255,255,255,0.04)",border:`1px solid ${c.warn?"rgba(255,59,48,0.25)":"rgba(255,255,255,0.07)"}`,borderRadius:12,padding:"16px 18px"}}>
+                    <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{c.label}</div>
+                    <div style={{fontSize:26,fontWeight:800,color:c.warn?"#FF3B30":"#fff",fontFamily:"'Barlow Condensed',sans-serif"}}>{c.value}</div>
+                    <div style={{fontSize:11,color:c.warn?"rgba(255,59,48,0.7)":"rgba(255,255,255,0.35)",marginTop:2}}>{c.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+                <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:20}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:16}}>
+                    {user.role==="counsellor"?"SHAP Feature Contributions":"Top Risk Factors"}
+                  </div>
+                  {(user.role==="counsellor"?selected.shap:selected.shap?.filter(s=>s.dir>0).slice(0,3) || []).map((s,i)=>(
+                    <ShapBar key={i} feature={s.feature} value={s.value} dir={s.dir} maxVal={maxShap}/>
                   ))}
+                  {user.role==="welfare"&&<div style={{fontSize:11,color:"rgba(255,255,255,0.25)",marginTop:10,fontStyle:"italic"}}>Full SHAP values available to Mental Health Counsellors only.</div>}
+                </div>
+
+                <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                  <div style={{background:`linear-gradient(135deg,${cfg.bg}0A,rgba(255,255,255,0.02))`,border:`1px solid ${cfg.bg}25`,borderRadius:14,padding:20}}>
+                    <div style={{fontSize:12,fontWeight:700,color:cfg.bg,textTransform:"uppercase",letterSpacing:1.5,marginBottom:12}}>XAI Explanation</div>
+                    <p style={{fontSize:13,color:"rgba(255,255,255,0.75)",lineHeight:1.65}}>{selected.explanation || "No explanation available."}</p>
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:20}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:12}}>
+                      {user.role==="counsellor"?"Clinical Recommendations":"Welfare Actions"}
+                    </div>
+                    {(selected.intervention || []).map((action,i)=>(
+                      <div key={i} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
+                        <div style={{width:20,height:20,borderRadius:6,flexShrink:0,background:i===0&&selected.tier==="high"?"rgba(255,59,48,0.2)":"rgba(255,255,255,0.07)",border:`1px solid ${i===0&&selected.tier==="high"?"rgba(255,59,48,0.4)":"rgba(255,255,255,0.1)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:i===0&&selected.tier==="high"?"#FF3B30":"rgba(255,255,255,0.4)"}}>
+                          {i+1}
+                        </div>
+                        <span style={{fontSize:12,color:"rgba(255,255,255,0.7)",lineHeight:1.5,flex:1}}>{action}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:20,marginBottom:16}}>
-              <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:16}}>Academic Trajectory — GPA per Semester</div>
-              <div style={{display:"flex",alignItems:"flex-end",gap:12,height:80}}>
-                {selected.gpa.map((g,i)=>{
-                  const h=(g/4.0)*80;
-                  const color=g<2.5?"#FF3B30":g<3.0?"#FF9F0A":"#30D158";
-                  return (
-                    <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flex:1}}>
-                      <span style={{fontSize:12,fontWeight:700,color,fontFamily:"'Barlow Condensed',sans-serif"}}>{g.toFixed(1)}</span>
-                      <div style={{width:"100%",height:`${h}px`,background:color,borderRadius:"6px 6px 2px 2px",opacity:0.8,boxShadow:`0 0 8px ${color}66`}}/>
-                      <span style={{fontSize:10,color:"rgba(255,255,255,0.3)"}}>Sem {i+1}</span>
-                    </div>
-                  );
-                })}
+              {selected.gpa && selected.gpa.length > 0 && (
+                <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:20,marginBottom:16}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:16}}>Academic Trajectory — GPA per Semester</div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:12,height:80}}>
+                    {selected.gpa.map((g,i)=>{
+                      const h=(g/4.0)*80;
+                      const color=g<2.5?"#FF3B30":g<3.0?"#FF9F0A":"#30D158";
+                      return (
+                        <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flex:1}}>
+                          <span style={{fontSize:12,fontWeight:700,color,fontFamily:"'Barlow Condensed',sans-serif"}}>{g.toFixed(1)}</span>
+                          <div style={{width:"100%",height:`${h}px`,background:color,borderRadius:"6px 6px 2px 2px",opacity:0.8,boxShadow:`0 0 8px ${color}66`}}/>
+                          <span style={{fontSize:10,color:"rgba(255,255,255,0.3)"}}>Sem {i+1}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div style={{padding:"12px 16px",background:"rgba(255,255,255,0.02)",borderRadius:10,border:"1px solid rgba(255,255,255,0.05)"}}>
+                <p style={{fontSize:11,color:"rgba(255,255,255,0.3)",lineHeight:1.6,fontStyle:"italic"}}>
+                  ⚠️ Decision support only. All predictions must be reviewed by a qualified professional before any intervention is initiated. XAI explanations support, not replace, clinical judgement. Model: XGBoost v2.1 · SHAP v0.46 · Last trained: Feb 2026.
+                </p>
               </div>
-            </div>
-
-            <div style={{padding:"12px 16px",background:"rgba(255,255,255,0.02)",borderRadius:10,border:"1px solid rgba(255,255,255,0.05)"}}>
-              <p style={{fontSize:11,color:"rgba(255,255,255,0.3)",lineHeight:1.6,fontStyle:"italic"}}>
-                ⚠️ Decision support only. All predictions must be reviewed by a qualified professional before any intervention is initiated. XAI explanations support, not replace, clinical judgement. Model: XGBoost v2.1 · SHAP v0.46 · Last trained: Feb 2026.
-              </p>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -601,6 +745,7 @@ function ClinicalDashboard({ user, onLogout }) {
 export default function App() {
   const [user, setUser] = useState(null);
   if (!user) return <LoginPage onLogin={setUser}/>;
-  if (user.role==="admin") return <AdminDashboard user={user} onLogout={()=>setUser(null)}/>;
-  return <ClinicalDashboard user={user} onLogout={()=>setUser(null)}/>;
+  if (user.role==="admin") return <AdminDashboard user={user} onLogout={() => { apiLogout(); setUser(null); }}/>;
+  return <ClinicalDashboard user={user} onLogout={() => { apiLogout(); setUser(null); }}/>;
 }
+

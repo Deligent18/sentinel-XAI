@@ -1,0 +1,58 @@
+=================================================================
+PREPROCESSING PIPELINE — SUMMARY REPORT
+XAI Framework for Student Suicide Risk Prediction
+NUST, Department of Informatics
+=================================================================
+
+Raw dataset shape           : (4800, 28)
+Clean dataset shape         : (4800, 47)
+Total features (model input): 37
+
+SPLIT SIZES (after SMOTE on training set)
+  Training set   : 6270 samples
+  Validation set : 721 samples
+  Test set       : 720 samples
+
+CLASS DISTRIBUTION
+  Training set (post-SMOTE):
+    Class 0 (Not High Risk) : 3135
+    Class 1 (High Risk)     : 3135
+  Validation set (original):
+    Class 0 (Not High Risk) : 673
+    Class 1 (High Risk)     : 48
+  Test set (original):
+    Class 0 (Not High Risk) : 672
+    Class 1 (High Risk)     : 48
+
+PIPELINE STEPS APPLIED
+  1.  ETL — merged LMS, Academic, Campus, Student, Risk tables
+  2.  Cleaning — median imputation, duplicate removal, IQR capping
+  3.  EDA — distributions, correlations, boxplots saved to /plots
+  4.  Feature engineering — 7 new features derived
+  5.  Encoding — one-hot (Gender, Programme, AcademicStanding)
+  6.  Scaling — Min-Max on 18 continuous features
+  7.  SMOTE — minority class oversampled (training set only)
+  8.  Split — stratified 70/15/15 train/val/test
+  9.  Datasets saved to /data/processed
+  10. Validation — all assertions passed
+
+OUTPUT FILES
+  data/processed/X_train.csv
+  data/processed/X_val.csv
+  data/processed/X_test.csv
+  data/processed/y_train.csv
+  data/processed/y_val.csv
+  data/processed/y_test.csv
+  models/minmax_scaler.pkl
+  models/feature_names.pkl
+  models/num_imputer.pkl
+  models/cat_imputer.pkl
+  plots/class_distribution.png
+  plots/feature_distributions.png
+  plots/correlation_heatmap.png
+  plots/features_by_risk_label.png
+  reports/missing_values_report.csv
+  reports/summary_statistics.csv
+  reports/preprocessing_summary.txt
+
+=================================================================

@@ -1,0 +1,49 @@
+{
+  "completed_at": "2026-02-28T15:25:07",
+  "raw_shape": [
+    4800,
+    28
+  ],
+  "clean_shape": [
+    4800,
+    28
+  ],
+  "feature_count": 37,
+  "class_distribution_before": {
+    "0": 3135,
+    "1": 224
+  },
+  "class_distribution_after_smote": {
+    "0": 3135,
+    "1": 3135
+  },
+  "split_sizes": {
+    "train": 6270,
+    "val": 721,
+    "test": 720
+  },
+  "missing_values_found": 0,
+  "outliers_capped": {
+    "GPA": 3,
+    "AvgLoginFrequency": 7
+  },
+  "engineered_features": [
+    "AcademicDeclineFlag",
+    "SocialWithdrawalFlag",
+    "DigitalDisengagementFlag",
+    "EngagedBehaviourScore",
+    "AssignmentCompletionRate",
+    "LateNightRatio",
+    "GPATier"
+  ],
+  "validation_checks": {
+    "passed": 10,
+    "failed": 3
+  },
+  "plots_generated": [
+    "class_distribution",
+    "feature_distributions",
+    "correlation_heatmap",
+    "features_by_risk_label"
+  ]
+}

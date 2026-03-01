@@ -1,61 +1,25 @@
-# XAI Risk Sentinel - Implementation Plan
+# TODO - Connect Frontend to Trained ML Data
 
-## Task Summary
-Extending the existing FastAPI backend for university student suicide risk prediction system with MySQL database integration, preprocessing pipeline endpoints, and frontend pages.
+## Tasks
 
-## Implementation Status
+- [x] 1. Update backend/server.py to load real student data from CSV
+- [x] 2. Integrate ML pipeline predictions (risk scores + SHAP values)
+- [x] 3. Update /stats endpoint to calculate from real data
+- [x] 4. Fix data path in data_service.py to point to correct CSV location
 
-### Phase 1: Backend Core - COMPLETED
-- [x] 1.1 Created `backend/database.py` with SQLAlchemy ORM models (11 tables)
-- [x] 1.2 Created `.env` template file
-- [x] 1.3 Updated `backend/requirements.txt` with new dependencies
-- [x] 1.4 Updated `backend/server.py` to load JWT_SECRET_KEY from .env
+## Implementation Complete ✓
 
-### Phase 2: Server Endpoints - COMPLETED
-- [x] 2.1 Added PREPROCESSING_STATE global variable
-- [x] 2.2 Added POST /preprocessing/run endpoint
-- [x] 2.3 Added GET /preprocessing/status endpoint
-- [x] 2.4 Added GET /preprocessing/results endpoint
-- [x] 2.5 Added GET /preprocessing/plots/{plot_name} endpoint
+The backend now loads students from CSV and generates predictions using the ML pipeline:
+1. `load_students_with_predictions()` function loads from CSV via data_service
+2. Runs `predict_all_students()` to get risk scores and SHAP values
+3. Caches predictions in global variables
+4. `/students` endpoint serves real data with ML predictions
+5. Falls back to hardcoded data if ML pipeline unavailable
 
-### Phase 3: Data Preprocessing Updates - COMPLETED
-- [x] 3.1 Added progress_callback parameter to main()
-- [x] 3.2 Added progress calls at each of 11 steps
-- [x] 3.3 Write preprocessing_results.json on completion
-
-### Phase 4: Frontend - COMPLETED
-- [x] 4.1 Created preprocessing.html with full UI
-- [x] 4.2 Created preprocessing.js with WebSocket + API logic
-
-### Phase 5: Navigation Link - PENDING
-- [ ] 5.1 Add navigation link to React dashboard (requires React component modification)
-
-## Files Created/Modified
-
-### New Files Created:
-1. `backend/database.py` - Full SQLAlchemy ORM with 11 table models
-2. `.env` - Environment variable template
-3. `frontend/preprocessing.html` - Complete preprocessing page UI
-4. `frontend/preprocessing.js` - Frontend JavaScript with WebSocket support
-
-### Files Modified:
-1. `backend/server.py` - Added preprocessing endpoints and .env loading
-2. `backend/requirements.txt` - Added new packages (sqlalchemy, pymysql, python-dotenv, etc.)
-3. `data_preprocessing.py` - Added progress_callback support and results JSON export
-
-## New API Endpoints
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/preprocessing/run` | POST | JWT | Run preprocessing pipeline |
-| `/preprocessing/status` | GET | None | Get pipeline status |
-| `/preprocessing/results` | GET | JWT | Get preprocessing results |
-| `/preprocessing/plots/{name}` | GET | None | Get plot image |
-
-## Followup Steps
-1. Install dependencies: `pip install -r backend/requirements.txt`
-2. Set up MySQL database with provided schema
-3. Update `.env` with actual DB credentials
-4. Run the FastAPI server and test endpoints
-5. Navigate to `frontend/preprocessing.html` to access the preprocessing page
+**Data Flow:**
+- CSV: `data/processed/students.csv` (20 students)
+- → data_service.load_students_from_csv()
+- → data_service.convert_csv_to_student_format()  
+- → data_service.predict_all_students() (runs ML pipeline)
+- → Returns students with risk scores, tiers, SHAP values, explanations, interventions
 

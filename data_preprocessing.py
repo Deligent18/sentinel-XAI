@@ -17,6 +17,7 @@ import warnings
 import joblib
 import numpy  as np
 import pandas as pd
+from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -35,7 +36,7 @@ warnings.filterwarnings('ignore')
 
 DB_CONFIG = {
     'user'    : 'root',
-    'password': 'your_password',
+    'password': 'root123',
     'host'    : 'localhost',
     'database': 'xai_student_risk_db',
 }
@@ -157,8 +158,8 @@ def load_and_merge_data():
         TotalQuizAttempts  = ('QuizAttempts',         'sum'),
     ).reset_index()
 
-    # ── Aggregate Campus Behaviour to semester level ───────────────────────────
-    campus_sem = campus.groupby(['StudentID', 'Semester']).agg(
+    # ── Aggregate Campus Behaviour at student level (since data is per student) ──
+    campus_student = campus.groupby(['StudentID']).agg(
         AvgAttendanceRate    = ('AttendanceRate',        'mean'),
         AvgLibraryVisits     = ('LibraryVisits',         'mean'),
         AvgDiningSwipes      = ('DiningSwipes',          'mean'),
@@ -171,7 +172,7 @@ def load_and_merge_data():
 
     # ── Merge all sources ─────────────────────────────────────────────────────
     df = academic.merge(lms_sem,    on=['StudentID', 'Semester'], how='left')
-    df = df.merge(campus_sem,       on=['StudentID', 'Semester'], how='left')
+    df = df.merge(campus_student,    on='StudentID', how='left')
     df = df.merge(
         students[['StudentID', 'Programme', 'YearOfStudy',
                   'Gender', 'EnrolmentStatus']],

@@ -1,0 +1,67 @@
+{
+  "timestamp": "2026-03-01 14:43:23",
+  "generation_time_seconds": 3.35305,
+  "validation_samples": 721,
+  "features_count": 37,
+  "top_features": [
+    {
+      "feature": "CreditCompletion",
+      "mean_abs_shap": 0.40491437911987305,
+      "rank": 1
+    },
+    {
+      "feature": "Programme_BSc Data Science",
+      "mean_abs_shap": 0.3216291666030884,
+      "rank": 2
+    },
+    {
+      "feature": "AvgAttendanceRate",
+      "mean_abs_shap": 0.2993256449699402,
+      "rank": 3
+    },
+    {
+      "feature": "AvgLateNightSessions",
+      "mean_abs_shap": 0.2841043770313263,
+      "rank": 4
+    },
+    {
+      "feature": "AvgLibraryVisits",
+      "mean_abs_shap": 0.27240294218063354,
+      "rank": 5
+    },
+    {
+      "feature": "GPAChange",
+      "mean_abs_shap": 0.24822719395160675,
+      "rank": 6
+    },
+    {
+      "feature": "AvgRecreationUse",
+      "mean_abs_shap": 0.19216424226760864,
+      "rank": 7
+    },
+    {
+      "feature": "YearOfStudy",
+      "mean_abs_shap": 0.18563993275165558,
+      "rank": 8
+    },
+    {
+      "feature": "GPA",
+      "mean_abs_shap": 0.16927045583724976,
+      "rank": 9
+    },
+    {
+      "feature": "AvgSessionDuration",
+      "mean_abs_shap": 0.15965422987937927,
+      "rank": 10
+    }
+  ],
+  "class_distribution": {
+    "0": 673,
+    "1": 48
+  },
+  "shap_values_shape": [
+    721,
+    37
+  ],
+  "mean_abs_shap_overall": 0.11109378188848495
+}

@@ -1,9 +1,11 @@
 """
 XAI Risk Sentinel - ML Pipeline Module
 Automated Student Mental Health Risk Prediction Pipeline
+Enhanced with trained model integration
 """
 
 import os
+import sys
 import json
 import joblib
 import shap
@@ -11,7 +13,12 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 from xgboost import XGBClassifier, XGBRegressor
+from sklearn.ensemble import RandomForestClassifier
 
 # Try to import PyCaret (optional)
 try:
@@ -20,14 +27,23 @@ try:
 except ImportError:
     PY_CARET_AVAILABLE = False
 
-# Configuration
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
-MODEL_PATH = os.path.join(MODEL_DIR, "risk_model.joblib")
-SCALER_PATH = os.path.join(MODEL_DIR, "scaler.joblib")
+# Configuration - Use parent directory paths
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+DATA_DIR = os.path.join(BASE_DIR, 'data', 'processed')
+MODEL_DIR = os.path.join(BASE_DIR, 'models')
+REPORTS_DIR = os.path.join(BASE_DIR, 'reports')
+
+# Model paths
+XGBOOST_MODEL_PATH = os.path.join(MODEL_DIR, 'xgboost_model.pkl')
+RF_MODEL_PATH = os.path.join(MODEL_DIR, 'random_forest_model.pkl')
+ACTIVE_MODEL_PATH = os.path.join(MODEL_DIR, 'active_model.pkl')
+SCALER_PATH = os.path.join(MODEL_DIR, 'minmax_scaler.pkl')
+FEATURE_NAMES_PATH = os.path.join(MODEL_DIR, 'feature_names.pkl')
+SHAP_EXPLAINER_PATH = os.path.join(MODEL_DIR, 'shap_explainer.pkl')
 
 # Ensure model directory exists
 os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(REPORTS_DIR, exist_ok=True)
 
 
 class MLPipeline:
@@ -574,7 +590,7 @@ class MLPipeline:
             return False
             
         if path is None:
-            path = MODEL_PATH
+            path = ACTIVE_MODEL_PATH
             
         try:
             joblib.dump(self.model, path)
@@ -598,7 +614,7 @@ class MLPipeline:
     def load_model(self, path: Optional[str] = None) -> bool:
         """Load trained model from disk"""
         if path is None:
-            path = MODEL_PATH
+            path = ACTIVE_MODEL_PATH
             
         try:
             self.model = joblib.load(path)
@@ -617,6 +633,67 @@ class MLPipeline:
         except Exception as e:
             print(f"Error loading model: {e}")
             return False
+    
+    def load_pretrained_models(self) -> bool:
+        """
+        Load pre-trained XGBoost and Random Forest models
+        Returns True if models loaded successfully
+        """
+        try:
+            # Load XGBoost model
+            if os.path.exists(XGBOOST_MODEL_PATH):
+                self.xgboost_model = joblib.load(XGBOOST_MODEL_PATH)
+                print(f"✓ XGBoost model loaded from {XGBOOST_MODEL_PATH}")
+            else:
+                print(f"Warning: XGBoost model not found at {XGBOOST_MODEL_PATH}")
+                self.xgboost_model = None
+            
+            # Load Random Forest model
+            if os.path.exists(RF_MODEL_PATH):
+                self.rf_model = joblib.load(RF_MODEL_PATH)
+                print(f"✓ Random Forest model loaded from {RF_MODEL_PATH}")
+            else:
+                print(f"Warning: Random Forest model not found at {RF_MODEL_PATH}")
+                self.rf_model = None
+            
+            # Load feature names
+            if os.path.exists(FEATURE_NAMES_PATH):
+                self.feature_names = joblib.load(FEATURE_NAMES_PATH)
+                print(f"✓ Feature names loaded: {len(self.feature_names)} features")
+            
+            # Set active model to XGBoost by default (typically performs better)
+            if self.xgboost_model is not None:
+                self.model = self.xgboost_model
+                self.is_trained = True
+                self.last_trained = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                return True
+            
+            return self.xgboost_model is not None
+            
+        except Exception as e:
+            print(f"Error loading pre-trained models: {e}")
+            return False
+    
+    def predict_with_pretrained(self, X: pd.DataFrame, model_type: str = 'xgboost') -> np.ndarray:
+        """
+        Make predictions using pre-trained models
+        
+        Args:
+            X: Feature DataFrame
+            model_type: 'xgboost' or 'random_forest'
+            
+        Returns:
+            Predictions array
+        """
+        if not hasattr(self, 'xgboost_model') or self.xgboost_model is None:
+            self.load_pretrained_models()
+        
+        if model_type == 'xgboost' and hasattr(self, 'xgboost_model') and self.xgboost_model is not None:
+            return self.xgboost_model.predict(X)
+        elif model_type == 'random_forest' and hasattr(self, 'rf_model') and self.rf_model is not None:
+            return self.rf_model.predict(X)
+        else:
+            raise ValueError(f"Model {model_type} not available")
     
     # =========================================================================
     # PIPELINE STATUS

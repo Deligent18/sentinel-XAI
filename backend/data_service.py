@@ -30,9 +30,12 @@ class DataService:
     def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
         """Load student data from CSV file"""
         if file_path is None:
+            # Look in parent directory for data/processed/students.csv
             file_path = os.path.join(
                 os.path.dirname(__file__), 
+                "..",
                 "data", 
+                "processed",
                 "students.csv"
             )
         

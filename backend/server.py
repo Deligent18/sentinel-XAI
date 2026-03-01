@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -34,10 +35,62 @@ except ImportError as e:
     def get_academic_results(students, programme):
         return {"status": "error", "message": "Academic results module not available"}
 
+# Global variable to store loaded students with predictions
+TRAFFIC_STUDENTS = []
+PREDICTIONS_LOADED = False
+
+
+def load_students_with_predictions():
+    """
+    Load students from CSV and generate predictions using ML pipeline.
+    Returns list of students with risk scores and SHAP values.
+    """
+    global TRAFFIC_STUDENTS, PREDICTIONS_LOADED
+    
+    if not ML_PIPELINE_AVAILABLE:
+        print("ML Pipeline not available, using fallback")
+        return []
+    
+    try:
+        # Load raw student data from CSV
+        csv_data = data_service.load_students_from_csv()
+        
+        if not csv_data:
+            print("No data found in CSV, using fallback")
+            return []
+        
+        # Convert to API format
+        students = data_service.convert_csv_to_student_format(csv_data)
+        
+        # Generate predictions using ML pipeline
+        predictions = data_service.predict_all_students(students)
+        
+        if predictions:
+            TRAFFIC_STUDENTS = predictions
+            PREDICTIONS_LOADED = True
+            print(f"Loaded {len(TRAFFIC_STUDENTS)} students with predictions from trained model")
+            return TRAFFIC_STUDENTS
+        else:
+            print("No predictions generated, using fallback")
+            return []
+            
+    except Exception as e:
+        print(f"Error loading students with predictions: {e}")
+        return []
+
 app = FastAPI(
     title="XAI Risk Sentinel API",
     description="Backend API for Student Mental Health Risk Monitoring System",
     version="1.0.0"
+)
+
+# CORS Configuration - Allow all origins for development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Secret key for JWT - load from environment variable with fallback
@@ -334,7 +387,17 @@ async def get_students(current_user: dict = Depends(get_current_user)):
     - Counsellor: sees full data including SHAP
     - Welfare: sees summaries only (no SHAP/explanation)
     - Admin: sees all data
+    
+    Uses ML pipeline predictions when available, falls back to hardcoded data
     """
+    global STUDENTS, TRAFFIC_STUDENTS, PREDICTIONS_LOADED
+    
+    # Try to load predictions if not loaded yet
+    if not PREDICTIONS_LOADED:
+        loaded_students = load_students_with_predictions()
+        if loaded_students:
+            STUDENTS = loaded_students
+    
     role = current_user["role"]
     return [filter_student_by_role(s, role) for s in STUDENTS]
 
@@ -447,22 +510,44 @@ async def create_user(
 
 @app.get("/stats")
 async def get_stats(current_user: dict = Depends(get_current_user)):
-    """Get system statistics"""
+    """
+    Get system statistics from trained ML model data
+    """
+    global STUDENTS, PREDICTIONS_LOADED
+    
+    # Try to load predictions if not loaded yet
+    if not PREDICTIONS_LOADED:
+        loaded_students = load_students_with_predictions()
+        if loaded_students:
+            STUDENTS = loaded_students
+    
     counts = {
-        "high": len([s for s in STUDENTS if s["tier"] == "high"]),
-        "medium": len([s for s in STUDENTS if s["tier"] == "medium"]),
-        "low": len([s for s in STUDENTS if s["tier"] == "low"]),
+        "high": len([s for s in STUDENTS if s.get("tier") == "high"]),
+        "medium": len([s for s in STUDENTS if s.get("tier") == "medium"]),
+        "low": len([s for s in STUDENTS if s.get("tier") == "low"]),
     }
+    
+    # Get model info from pipeline if available
+    model_info = {
+        "model": "XGBoost v2.1",
+        "shap": "v0.46",
+        "lastTrained": "22 Feb 2026",
+        "auc_roc": "0.88"
+    }
+    
+    if ML_PIPELINE_AVAILABLE and pipeline:
+        try:
+            pipeline_status = pipeline.get_status()
+            if pipeline_status.get("last_trained"):
+                model_info["lastTrained"] = pipeline_status["last_trained"]
+        except:
+            pass
+    
     return {
         "totalStudents": len(STUDENTS),
         "riskCounts": counts,
         "activeUsers": len([u for u in SYSTEM_USERS if u["status"] == "Active"]),
-        "modelInfo": {
-            "model": "XGBoost v2.1",
-            "shap": "v0.46",
-            "lastTrained": "22 Feb 2026",
-            "auc_roc": "0.88"
-        }
+        "modelInfo": model_info
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
