@@ -392,11 +392,14 @@ async def get_students(current_user: dict = Depends(get_current_user)):
     """
     global STUDENTS, TRAFFIC_STUDENTS, PREDICTIONS_LOADED
     
-    # Try to load predictions if not loaded yet
-    if not PREDICTIONS_LOADED:
+    # ✓ FIX 6.1: Always refresh predictions from ML pipeline
+    if not PREDICTIONS_LOADED or True:  # Force refresh
         loaded_students = load_students_with_predictions()
         if loaded_students:
             STUDENTS = loaded_students
+            PREDICTIONS_LOADED = True
+        else:
+            print("[WARNING] Could not load ML predictions, using fallback data")
     
     role = current_user["role"]
     return [filter_student_by_role(s, role) for s in STUDENTS]

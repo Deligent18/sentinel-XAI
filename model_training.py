@@ -31,20 +31,65 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 
 
 def load_data():
-    """Load preprocessed training and test data"""
+    """✓ FIX 3.3: Load data with full validation checks"""
     print("=" * 60)
     print("Loading preprocessed data...")
     print("=" * 60)
     
+    feature_files = {
+        'X_train': 'X_train.csv',
+        'X_test': 'X_test.csv', 
+        'X_val': 'X_val.csv'
+    }
+    label_files = {
+        'y_train': 'y_train.csv',
+        'y_test': 'y_test.csv',
+        'y_val': 'y_val.csv'
+    }
+    
+    data = {}
+    
     # Load features
-    X_train = pd.read_csv(os.path.join(DATA_DIR, 'X_train.csv'))
-    X_test = pd.read_csv(os.path.join(DATA_DIR, 'X_test.csv'))
-    X_val = pd.read_csv(os.path.join(DATA_DIR, 'X_val.csv'))
+    for key, fname in feature_files.items():
+        path = os.path.join(DATA_DIR, fname)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Required file missing: {path}")
+        data[key] = pd.read_csv(path)
+        print(f"✓ Loaded {key}: {data[key].shape}")
     
     # Load labels
-    y_train = pd.read_csv(os.path.join(DATA_DIR, 'y_train.csv'))
-    y_test = pd.read_csv(os.path.join(DATA_DIR, 'y_test.csv'))
-    y_val = pd.read_csv(os.path.join(DATA_DIR, 'y_val.csv'))
+    for key, fname in label_files.items():
+        path = os.path.join(DATA_DIR, fname)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Required file missing: {path}")
+        data[key] = pd.read_csv(path)
+        print(f"✓ Loaded {key}: {len(data[key])} samples")
+    
+    # ✓ FIX 3.3: Comprehensive validation
+    X_train, X_test, X_val = data['X_train'], data['X_test'], data['X_val']
+    y_train, y_test, y_val = data['y_train'], data['y_test'], data['y_val']
+    
+    # Validate shapes
+    assert len(X_train) == len(y_train), f"X_train/y_train shape mismatch: {len(X_train)} vs {len(y_train)}"
+    assert len(X_test) == len(y_test), f"X_test/y_test shape mismatch"
+    assert len(X_val) == len(y_val), f"X_val/y_val shape mismatch"
+    
+    # Validate no NaNs
+    assert X_train.isnull().sum().sum() == 0, f"X_train has {X_train.isnull().sum().sum()} NaN values"
+    assert y_train.isnull().sum().sum() == 0, f"y_train has NaN values"
+    
+    # Validate feature count consistency
+    n_features = X_train.shape[1]
+    assert X_test.shape[1] == n_features, f"X_test has wrong feature count"
+    assert X_val.shape[1] == n_features, f"X_val has wrong feature count"
+    
+    # Validate target distribution
+    from collections import Counter
+    train_dist = Counter(y_train.values.ravel())
+    print(f"[INFO] Train distribution: {train_dist}")
+    
+    if len(train_dist) == 1:
+        raise ValueError("Training data has only one class - cannot train classifier!")
     
     print(f"Training samples: {len(X_train)}")
     print(f"Test samples: {len(X_test)}")

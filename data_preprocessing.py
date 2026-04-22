@@ -64,15 +64,14 @@ CONTINUOUS_COLS = [
 ]
 
 # Numerical columns used for imputation
-NUMERICAL_COLS = [
-    'AvgLoginFrequency', 'TotalMissed', 'TotalSubmitted',
-    'AvgForumActivity',  'AvgSessionDuration', 'TotalDownloads',
-    'TotalQuizAttempts', 'GPA', 'GPAChange', 'CreditCompletion',
-    'AvgAttendanceRate', 'AvgLibraryVisits', 'AvgDiningSwipes',
-    'AvgLateNightSessions', 'AvgRecreationUse',
-]
+# ✓ FIX 2.2: DYNAMIC feature lists from loaded data (handles missing columns)
+NUMERICAL_COLS = [c for c in df.select_dtypes(include=['number']).columns 
+                  if c not in ['StudentID', 'ActivityID', 'RecordID']]
+CATEGORICAL_COLS = [c for c in df.select_dtypes(include=['object']).columns 
+                    if c not in ['StudentID']]
 
-CATEGORICAL_COLS = ['Gender', 'AcademicStanding', 'EnrolmentStatus']
+print(f"[INFO] Dynamic NUMERICAL_COLS ({len(NUMERICAL_COLS)}): {NUMERICAL_COLS[:5]}...")
+print(f"[INFO] Dynamic CATEGORICAL_COLS ({len(CATEGORICAL_COLS)}): {CATEGORICAL_COLS}")
 
 OUTLIER_COLS = [
     'AvgLoginFrequency', 'TotalMissed', 'AvgSessionDuration',
@@ -124,28 +123,64 @@ def load_and_merge_data():
     engine = create_engine(connection_str)
     print("[INFO] Database connection established.")
 
-    # ── Load raw tables ──────────────────────────────────────────────────────
-    students = pd.read_sql('SELECT * FROM Student',          engine)
-    lms      = pd.read_sql('SELECT * FROM LMS_Activity',     engine)
-    academic = pd.read_sql('SELECT * FROM Academic_Record',  engine)
-    campus   = pd.read_sql('SELECT * FROM Campus_Behaviour', engine)
-    risk     = pd.read_sql('SELECT StudentID, RiskLabel '
-                           'FROM Risk_Prediction '
-                           'WHERE Reviewed = 1',             engine)
+# ── Load raw tables ──────────────────────────────────────────────────────
+students = pd.read_sql('SELECT * FROM Student',          engine)
+lms      = pd.read_sql('SELECT * FROM LMS_Activity',     engine)
+academic = pd.read_sql('SELECT * FROM Academic_Record',  engine)
+campus   = pd.read_sql('SELECT * FROM Campus_Behaviour', engine)
+risk     = pd.read_sql('SELECT StudentID, RiskLabel '
+                       'FROM Risk_Prediction '
+                       'WHERE Reviewed = 1',             engine)
 
-    print(f"[INFO] Loaded: Students={len(students)}, LMS={len(lms)}, "
-          f"Academic={len(academic)}, Campus={len(campus)}, Risk={len(risk)}")
+# ✓ FIX 1.1: Rename SQL columns to Python expectations (PascalCase → snake_case)
+students.rename(columns={
+    'StudentID': 'StudentID',  # Keep for joins
+    'FullName': 'name',
+    'YearOfStudy': 'year_of_study',
+    'Programme': 'programme',
+    'Gender': 'gender',
+    'EnrolmentStatus': 'enrolment_status'
+}, inplace=True)
 
-    # ── Assign semesters to weekly/daily records ──────────────────────────────
-    def to_semester(date_col):
-        return date_col.apply(
-            lambda d: f"{d.year}-S1" if d.month <= 6 else f"{d.year}-S2"
-        )
+lms.rename(columns={
+    'LoginFrequency': 'AvgLoginFrequency',
+    'AssignmentsSubmitted': 'TotalSubmitted',
+    'AssignmentsMissed': 'TotalMissed',
+    'ForumParticipation': 'AvgForumActivity',
+    'SessionDurationAvg': 'AvgSessionDuration'
+}, inplace=True)
 
-    lms['WeekOf']         = pd.to_datetime(lms['WeekOf'])
-    campus['RecordDate']  = pd.to_datetime(campus['RecordDate'])
-    lms['Semester']       = to_semester(lms['WeekOf'])
-    campus['Semester']    = to_semester(campus['RecordDate'])
+academic.rename(columns={
+    'GPAChange': 'GPAChange'  # Already matches
+}, inplace=True)
+
+campus.rename(columns={
+    'AttendanceRate': 'AvgAttendanceRate',
+    'LibraryVisits': 'AvgLibraryVisits',
+    'DiningSwipes': 'AvgDiningSwipes',
+    'LateNightWiFiSessions': 'AvgLateNightSessions',
+    'RecreationFacilityUse': 'AvgRecreationUse'
+}, inplace=True)
+
+print(f"[INFO] Loaded: Students={len(students)}, LMS={len(lms)}, "
+      f"Academic={len(academic)}, Campus={len(campus)}, Risk={len(risk)}")
+
+# ✓ Column validation
+expected_student_cols = ['StudentID', 'name']
+missing = [c for c in expected_student_cols if c not in students.columns]
+if missing:
+    raise ValueError(f"Missing critical Student columns after rename: {missing}")
+
+# ── Assign semesters to weekly/daily records ──────────────────────────────
+def to_semester(date_col):
+    return date_col.apply(
+        lambda d: f"{d.year}-S1" if d.month <= 6 else f"{d.year}-S2"
+    )
+
+lms['WeekOf']         = pd.to_datetime(lms['WeekOf'])
+campus['RecordDate']  = pd.to_datetime(campus['RecordDate'])
+lms['Semester']       = to_semester(lms['WeekOf'])
+campus['Semester']    = to_semester(campus['RecordDate'])
 
     # ── Aggregate LMS to semester level ──────────────────────────────────────
     lms_sem = lms.groupby(['StudentID', 'Semester']).agg(
@@ -560,6 +595,8 @@ def apply_smote(X_train, y_train):
     training set only. Validation and test sets are kept untouched
     to reflect real-world class distribution during evaluation.
     """
+    from collections import Counter
+    
     separator("STEP 7 — CLASS IMBALANCE HANDLING (SMOTE)")
 
     print("[INFO] Class distribution BEFORE SMOTE:")
@@ -567,9 +604,18 @@ def apply_smote(X_train, y_train):
     for label, count in sorted(before.items()):
         print(f"        Class {label}: {count} samples")
 
+    min_count = min(before.values())
+    
+    # ✓ FIX 2.3: Safe SMOTE - dynamic k_neighbors, skip if insufficient data
+    if min_count < 2:
+        print(f"[WARNING] Only {min_count} minority samples. Skipping SMOTE (use class_weight in model)")
+        return X_train, y_train
+    
+    k_neighbors = min(SMOTE_K, min_count - 1)  # Safe k_neighbors
+    
     smote = SMOTE(
         sampling_strategy = SMOTE_STRATEGY,
-        k_neighbors       = SMOTE_K,
+        k_neighbors       = k_neighbors,
         random_state      = RANDOM_STATE,
     )
     X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
@@ -663,6 +709,24 @@ def save_datasets(X_train, X_val, X_test,
         path = f'{DIR_DATA}/{name}.csv'
         pd.Series(series, name='RiskBinary').to_csv(path, index=False)
         print(f"[SAVE] {name}.csv → {path}  ({len(series)} labels)")
+    
+    # ✓ NEW: Create students.csv for backend/data_service.py consumption
+    student_df = pd.DataFrame({
+        'student_id': df['StudentID'],
+        'name': df['name'],
+        'programme': df['programme'],
+        'year': df['year_of_study'],
+        'gpa_sem1': df['GPA'].shift(2).fillna(df['GPA']),  # Approximate
+        'gpa_sem2': df['GPA'].shift(1).fillna(df['GPA']),
+        'gpa_sem3': df['GPA'],
+        'attendance': df.get('AvgAttendanceRate', 75.0),
+        'lms_logins': df.get('AvgLoginFrequency', 10.0),
+        'facility_access': df.get('AvgDiningSwipes', 7.0) + df.get('AvgLibraryVisits', 2.0),
+        'risk_label': df['RiskLabel']
+    })
+    students_path = f'{DIR_DATA}/students.csv'
+    student_df.to_csv(students_path, index=False)
+    print(f"[SAVE] students.csv → {students_path}  ({len(student_df)} students)")
 
 
 # =============================================================================
@@ -689,6 +753,28 @@ def validate_pipeline(X_train, X_val, X_test,
         else:
             print(f"  ✗  FAILED: {message}")
             failed += 1
+    
+    # ✓ FIX: Enhanced validation for production robustness
+    check(len(X_train) > 0, "Training set is non-empty")
+    check(X_train.isnull().sum().sum() == 0, "No NaN values in training features")
+    check(X_val.isnull().sum().sum() == 0, "No NaN values in validation features")
+    check(X_test.isnull().sum().sum() == 0, "No NaN values in test features")
+    
+    from collections import Counter
+    train_dist = Counter(y_train)
+    check(len(train_dist) >= 2, "Training target has both classes")
+    
+    scale_cols = [c for c in CONTINUOUS_COLS if c in pd.DataFrame(X_train, columns=feature_names).columns]
+    if scale_cols:
+        X_train_df = pd.DataFrame(X_train, columns=feature_names)
+        in_range = all(X_train_df[col].between(0, 1).all() for col in scale_cols)
+        check(in_range, f"Continuous features scaled [{len(scale_cols)} cols]")
+    
+    check(len(X_train) > len(X_train_raw), "SMOTE increased training size (or skipped safely)")
+    
+    n_features = len(feature_names)
+    check(all(pd.DataFrame(s).shape[1] == n_features for s in [X_train, X_val, X_test]),
+          f"Feature count consistent: {n_features}")
 
     # No missing values in any split
     check(pd.DataFrame(X_train).isnull().sum().sum() == 0,

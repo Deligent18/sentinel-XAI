@@ -27,21 +27,32 @@ class DataService:
     # DATA LOADING
     # =========================================================================
     
-    def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
-        """Load student data from CSV file"""
+def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
+        """
+        ✓ FIX 4.1: Multi-path search + sample fallback if no CSV
+        """
         if file_path is None:
-            # Look in parent directory for data/processed/students.csv
-            file_path = os.path.join(
-                os.path.dirname(__file__), 
-                "..",
-                "data", 
-                "processed",
-                "students.csv"
-            )
+            # ✓ Look in multiple locations (preprocessing output + alternatives)
+            possible_paths = [
+                os.path.join(os.path.dirname(__file__), "..", "data", "processed", "students.csv"),
+                os.path.join(os.path.dirname(__file__), "..", "backend", "data", "students.csv"),
+                os.path.join(os.path.dirname(__file__), "..", "data", "students.csv"),
+                "data/processed/students.csv",
+            ]
+            
+            file_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    file_path = path
+                    break
+            
+            if file_path is None:
+                print("[INFO] No students.csv found - using sample data")
+                return self._generate_sample_students()
         
         if not os.path.exists(file_path):
-            print(f"CSV file not found: {file_path}")
-            return []
+            print(f"[WARNING] CSV file not found: {file_path}")
+            return self._generate_sample_students()
         
         df = pd.read_csv(file_path)
         self.last_sync = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

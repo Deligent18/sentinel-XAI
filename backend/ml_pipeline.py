@@ -264,13 +264,19 @@ class MLPipeline:
         df = self.engineer_features(df)
         X = self.prepare_features(df)
         
-        # Prepare target variable
-        # Convert labels to numeric: high=2, medium=1, low=0
-        risk_mapping = {'low': 0, 'medium': 1, 'high': 2}
-        if 'risk_label' in df.columns:
-            y = df['risk_label'].map(risk_mapping)
+# Prepare target variable
+        # ✓ FIX 2.1: Single source of truth + PascalCase (from preprocessing)
+        RISK_LABEL_MAPPING = {
+            'High': 2, 'Medium': 1, 'Low': 0
+        }
+        if 'RiskLabel' in df.columns:
+            y = df['RiskLabel'].map(RISK_LABEL_MAPPING)
+        elif 'risk_label' in df.columns:
+            # Handle both cases (DB vs CSV)
+            df['RiskLabel'] = df['risk_label'].str.title()
+            y = df['RiskLabel'].map(RISK_LABEL_MAPPING)
         else:
-            raise ValueError("No risk_label column found in data")
+            raise ValueError("No risk_label or RiskLabel column found in data")
         
         # Train XGBoost classifier
         self.model = XGBClassifier(
@@ -339,9 +345,17 @@ class MLPipeline:
         df = self.engineer_features(df)
         X = self.prepare_features(df)
         
-        # Map risk labels
-        risk_mapping = {'low': 0, 'medium': 1, 'high': 2}
-        y = df['risk_label'].map(risk_mapping)
+# ✓ FIX 2.1: Use same RISK_LABEL_MAPPING (PyCaret)
+        RISK_LABEL_MAPPING = {
+            'High': 2, 'Medium': 1, 'Low': 0
+        }
+        if 'RiskLabel' in df.columns:
+            y = df['RiskLabel'].map(RISK_LABEL_MAPPING)
+        elif 'risk_label' in df.columns:
+            df['RiskLabel'] = df['risk_label'].str.title()
+            y = df['RiskLabel'].map(RISK_LABEL_MAPPING)
+        else:
+            raise ValueError("No risk_label or RiskLabel column found")
         
         # PyCaret setup
         pycaret_setup(data=pd.concat([X, y], axis=1), target='risk_label', verbose=False)
@@ -454,10 +468,7 @@ class MLPipeline:
     
     def generate_shap_explanation(self, X: pd.DataFrame, original_data: Dict = None) -> List[Dict]:
         """
-        Generate SHAP explanations for predictions
-        
-        Returns:
-            List of feature contributions
+        ✓ FIX 5.1: Generate SHAP with normalized 'importance' for frontend + feature validation
         """
         if not self.is_trained:
             return []
@@ -470,25 +481,32 @@ class MLPipeline:
         feature_values = X.iloc[0].to_dict() if len(X) > 0 else {}
         
         explanations = []
+        
+        # Get absolute maximum for normalization ✓ FIX 5.1
+        if len(self.feature_names) > 0 and len(shap_values) > 0 and len(shap_values[0]) > 0:
+            max_shap = max([abs(shap_values[0][i]) for i in range(len(self.feature_names))] or [1])
+        else:
+            max_shap = 1.0
+        
         for i, feature in enumerate(self.feature_names):
-            if i < len(shap_values[0]):
-                value = shap_values[0][i]
-                dir_flag = 1 if value > 0 else -1
+            if i < len(shap_values) and i < len(shap_values[0]):
+                raw_value = shap_values[0][i]
                 
                 # Create human-readable feature name
                 feature_label = self._format_feature_name(feature, original_data)
                 
                 explanations.append({
                     "feature": feature_label,
-                    "value": float(value),
-                    "dir": dir_flag,
+                    "value": float(raw_value),           # Raw SHAP value (can be negative)
+                    "importance": float(abs(raw_value) / max_shap),  # Normalized 0-1 for UI ✓ FIX 5.1
+                    "dir": 1 if raw_value > 0 else -1,
                     "feature_value": float(feature_values.get(feature, 0))
                 })
         
         # Sort by absolute value
         explanations.sort(key=lambda x: abs(x['value']), reverse=True)
         
-        return explanations[:6]  # Return top 6
+        return explanations[:6]
     
     def _format_feature_name(self, feature: str, data: Dict = None) -> str:
         """Convert technical feature names to human-readable labels"""
