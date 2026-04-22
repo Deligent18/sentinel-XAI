@@ -253,9 +253,7 @@ export async function createAuditLog(action, target, level) {
   }
 }
 
-// ============================================
-// USERS API
-// ============================================
+// ============================================\n// USERS API\n// ============================================\n\nexport async function createUser(userData) {\n  try {\n    const response = await authenticatedFetch(`${API_BASE_URL}/users`, {\n      method: 'POST',\n      body: JSON.stringify(userData),\n    });\n    \n    if (!response.ok) {\n      throw new Error('Failed to create user');\n    }\n    \n    const result = await response.json();\n    return { success: true, result };\n  } catch (error) {\n    console.error('Error creating user:', error);\n    return { success: false, error: error.message };\n  }\n}
 
 export async function fetchUsers() {
   try {
@@ -537,53 +535,5 @@ export async function healthCheck() {
 // EXPORT DEFAULT API OBJECT
 // ============================================
 
-export default {
-  // Auth
-  login,
-  logout,
-  getStoredToken,
-  getStoredUser,
-  isAuthenticated,
-  
-  // Students
-  fetchStudents,
-  fetchStudent,
-  updateStudent,
-  
-  // Stats
-  fetchStats,
-  
-  // Roles
-  fetchRoles,
-  
-  // Tier
-  fetchTierConfig,
-  
-  // Audit
-  fetchAuditLogs,
-  createAuditLog,
-  
-  // Users
-  fetchUsers,
-  
-  // Pipeline
-  getPipelineStatus,
-  runPipeline,
-  predictStudent,
-  batchUpdatePredictions,
-  
-  // Preprocessing
-  runPreprocessing,
-  getPreprocessingStatus,
-  getPreprocessingResults,
-  
-  // WebSocket
-  wsManager,
-  
-  // Health
-  healthCheck,
-  
-  // Base URL
-  API_BASE_URL,
-};
+export default {\n  // Auth\n  login,\n  logout,\n  getStoredToken,\n  getStoredUser,\n  isAuthenticated,\n  \n  // Students\n  fetchStudents,\n  fetchStudent,\n  updateStudent,\n  \n  // Stats\n  fetchStats,\n  \n  // Roles\n  fetchRoles,\n  \n  // Tier\n  fetchTierConfig,\n  \n  // Audit\n  fetchAuditLogs,\n  createAuditLog,\n  \n  // Users\n  fetchUsers,\n  createUser,\n  \n  // Pipeline\n  getPipelineStatus,\n  runPipeline,\n  predictStudent,\n  batchUpdatePredictions,\n  \n  // Preprocessing\n  runPreprocessing,\n  getPreprocessingStatus,\n  getPreprocessingResults,\n  \n  // WebSocket\n  wsManager,\n  \n  // Health\n  healthCheck,\n  \n  // Base URL\n  API_BASE_URL,\n};
 

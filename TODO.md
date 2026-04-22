@@ -1,42 +1,40 @@
-# Sentinel-XAI Pipeline Fix Tracker
-**Approved Plan Execution** | Status: [IN PROGRESS]
+# Sentinel-XAI Final Fixes Tracker
+**Status: IMPLEMENTING REMAINING API/BUG FIXES**
 
-## Planned Steps (From Approved Edit Plan)
+## Completed Pipeline Steps (from previous)
+- [x] data_preprocessing.py fixes
+- [x] ml_pipeline.py fixes  
+- [x] data_service.py (partial)
+- [x] model_training.py fixes
+- [x] server.py (partial)
 
-### **✅ STEP 1: Create this TODO.md** 
-- [x] TODO.md created with all steps
+## 🚀 Current Steps (Approved Plan)
 
-### **✅ STEP 2: Fix data_preprocessing.py (Priority 1)**
-- [x] Column renaming after SQL loads
-- [x] Dynamic NUMERICAL_COLS/CATEGORICAL_COLS from df
-- [x] Safe SMOTE with dynamic k_neighbors
-- [x] Full validation checks (NaN, empty, balance)
-- [x] Generate students.csv for backend
+**TODO 1: [PENDING] backend/server.py fixes**
+- [ ] Remove `or True` performance bug
+- [ ] Enrich /login response with user info
+- [ ] Update Token model (extra=allow)
 
-### **✅ STEP 3: Fix backend/ml_pipeline.py**
-- [x] Global RISK_MAPPING (PascalCase)
-- [x] Load feature_names.pkl in load_model()
-- [x] prepare_features() uses only trained features
-- [x] SHAP adds normalized 'importance' field
+**TODO 2: [PENDING] backend/data_service.py fixes**
+- [ ] Add missing CSV fields to convert_csv_to_student_format
+- [ ] Expand _to_ml_format with all features
 
-### **✅ STEP 4: Fix backend/data_service.py**
-- [x] Multi-path CSV search + sample fallback
-- [x] Merge student metadata + prediction in predict_single_student()
+**TODO 3: [PENDING] frontend/src/api.js**
+- [ ] Add createUser() function + export
 
-### **✅ STEP 5: Fix model_training.py**
-- [x] Validation in load_data() (assertions)
-- [x] Save feature_names + metadata JSON
+**TODO 4: [PENDING] Test backend**
+`cd backend && py server.py`
+- Verify /login returns user info
+- /students no longer reloads every call
+- POST /users works
 
-### **✅ STEP 6: Update backend/server.py**
-- [x] Refresh STUDENTS after /pipeline/run
+**TODO 5: [PENDING] Frontend + Node install**
+Manual Node.js install → `cd frontend && npm i && npm run dev`
 
-### **🔬 TESTING STEPS** (Execute now!)
-```
-python data_preprocessing.py          # → students.csv + models/
-python model_training.py              # → xgboost_model.pkl + training_results.json
-cd backend && uvicorn server:app --reload  # → /students → ML data with SHAP!
-cd ../frontend && npm run dev         # → React dashboard with real predictions
-```
+**TODO 6: [PENDING] End-to-end test**
+- Login, view students/SHAP, create user, WS updates
 
-**Status: ✅ ALL FIXES COMPLETE! Pipeline ready for production.**
+**TODO 7: [PENDING] Push & PR**
+
+*Next: Apply code fixes → Mark complete → Test*
 

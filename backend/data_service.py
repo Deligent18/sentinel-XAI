@@ -86,6 +86,9 @@ def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
                 "attendance": row.get('attendance', 0),
                 "lmsLogins": row.get('lms_logins', 0),
                 "facilityAccess": row.get('facility_access', 0),
+                "library_visits": row.get('library_visits', 0),
+                "after_hours_wifi": row.get('after_hours_wifi', 0),
+                "assignment_submissions": row.get('assignment_submissions', 0),
             }
             students.append(student)
             
@@ -177,6 +180,9 @@ def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
             "attendance": student.get('attendance', 0),
             "lms_logins": student.get('lmsLogins', 0),
             "facility_access": student.get('facilityAccess', 0),
+            "library_visits": student.get('library_visits', 0),
+            "after_hours_wifi": student.get('after_hours_wifi', 0),
+            "assignment_submissions": student.get('assignment_submissions', 0),
         }
     
     # =========================================================================

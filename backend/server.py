@@ -266,6 +266,10 @@ class Login(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    user: Optional[Dict] = None
+    
+    class Config:
+        extra = "allow"
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -378,7 +382,16 @@ async def login(form_data: Login):
         )
     
     access_token = create_access_token(data={"sub": user["username"], "role": user["role"]})
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "user": {
+            "username": user["username"],
+            "name": user["name"],
+            "role": user["role"],
+            "roleLabel": user.get("roleLabel", user["role"])
+        }
+    }
 
 @app.get("/students")
 async def get_students(current_user: dict = Depends(get_current_user)):
@@ -393,7 +406,7 @@ async def get_students(current_user: dict = Depends(get_current_user)):
     global STUDENTS, TRAFFIC_STUDENTS, PREDICTIONS_LOADED
     
     # ✓ FIX 6.1: Always refresh predictions from ML pipeline
-    if not PREDICTIONS_LOADED or True:  # Force refresh
+if not PREDICTIONS_LOADED:
         loaded_students = load_students_with_predictions()
         if loaded_students:
             STUDENTS = loaded_students
