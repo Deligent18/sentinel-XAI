@@ -437,6 +437,10 @@ function AdminDashboard({ user, onLogout }) {
   const [systemUsers, setSystemUsers] = useState(FALLBACK_SYSTEM_USERS);
   const [auditLogs, setAuditLogs] = useState(FALLBACK_AUDIT_LOGS);
   const [loading, setLoading] = useState(true);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({ name:"", username:"", password:"", role:"counsellor" });
+  const [addUserError, setAddUserError] = useState("");
+  const [addUserLoading, setAddUserLoading] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -467,6 +471,23 @@ function AdminDashboard({ user, onLogout }) {
     
     loadData();
   }, []);
+
+  async function handleAddUser() {
+    if (!newUser.name.trim() || !newUser.username.trim() || !newUser.password.trim()) {
+      setAddUserError("All fields are required."); return;
+    }
+    setAddUserLoading(true); setAddUserError("");
+    const result = await api.createUser(newUser);
+    setAddUserLoading(false);
+    if (result.success) {
+      setShowAddUser(false);
+      setNewUser({ name:"", username:"", password:"", role:"counsellor" });
+      const usersResult = await api.fetchUsers();
+      if (usersResult.success) setSystemUsers(usersResult.users);
+    } else {
+      setAddUserError(result.error || "Failed to create user.");
+    }
+  }
 
   const counts = stats?.riskCounts || {high:0, medium:0, low:0};
   const totalStudents = stats?.totalStudents || 0;
@@ -509,8 +530,63 @@ function AdminDashboard({ user, onLogout }) {
                 </div>
               </div>
             ))}
-            <button style={{marginTop:14,width:"100%",padding:10,borderRadius:10,border:"1px dashed rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,255,255,0.4)",fontSize:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>+ Add User</button>
+            <button
+              onClick={() => { setShowAddUser(true); setAddUserError(""); }}
+              style={{marginTop:14,width:"100%",padding:10,borderRadius:10,border:"1px dashed rgba(255,255,255,0.2)",background:"transparent",color:"rgba(255,255,255,0.5)",fontSize:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+            >+ Add User</button>
           </div>
+
+          {showAddUser && (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setShowAddUser(false)}>
+              <div style={{background:"#13131E",border:"1px solid rgba(255,255,255,0.1)",borderRadius:18,padding:32,width:380,boxShadow:"0 24px 64px rgba(0,0,0,0.6)",animation:"slideIn 0.2s ease"}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:15,fontWeight:700,color:"#fff",marginBottom:22,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:0.5}}>ADD SYSTEM USER</div>
+                {[
+                  {label:"Full Name",key:"name",placeholder:"e.g. Dr. Mabunda, F."},
+                  {label:"Username",key:"username",placeholder:"e.g. counsellor3"},
+                  {label:"Password",key:"password",placeholder:"Min 8 characters",type:"password"},
+                ].map(({label,key,placeholder,type})=>(
+                  <div key={key} style={{marginBottom:14}}>
+                    <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginBottom:5,textTransform:"uppercase",letterSpacing:1}}>{label}</div>
+                    <input
+                      type={type||"text"}
+                      value={newUser[key]}
+                      onChange={e=>setNewUser(p=>({...p,[key]:e.target.value}))}
+                      placeholder={placeholder}
+                      style={{width:"100%",padding:"10px 14px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,color:"#fff",fontSize:13,fontFamily:"'DM Sans',sans-serif",outline:"none"}}
+                    />
+                  </div>
+                ))}
+                <div style={{marginBottom:18}}>
+                  <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginBottom:5,textTransform:"uppercase",letterSpacing:1}}>Role</div>
+                  <select
+                    value={newUser.role}
+                    onChange={e=>setNewUser(p=>({...p,role:e.target.value}))}
+                    style={{width:"100%",padding:"10px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,color:"#fff",fontSize:13,fontFamily:"'DM Sans',sans-serif",outline:"none"}}
+                  >
+                    <option value="counsellor">Counsellor</option>
+                    <option value="welfare">Welfare Officer</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                {addUserError && (
+                  <div style={{color:"#FF3B30",fontSize:12,marginBottom:14,padding:"8px 12px",background:"rgba(255,59,48,0.1)",borderRadius:8,border:"1px solid rgba(255,59,48,0.2)"}}>
+                    {addUserError}
+                  </div>
+                )}
+                <div style={{display:"flex",gap:10}}>
+                  <button
+                    onClick={()=>setShowAddUser(false)}
+                    style={{flex:1,padding:"10px 0",borderRadius:10,border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"rgba(255,255,255,0.5)",fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                  >Cancel</button>
+                  <button
+                    onClick={handleAddUser}
+                    disabled={addUserLoading}
+                    style={{flex:2,padding:"10px 0",borderRadius:10,border:"none",background:addUserLoading?"rgba(99,106,255,0.4)":"#636AFF",color:"#fff",fontSize:13,fontWeight:600,cursor:addUserLoading?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                  >{addUserLoading?"Creating…":"Create User"}</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:22}}>
             <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:16}}>Recent Audit Log</div>
@@ -543,6 +619,8 @@ function ClinicalDashboard({ user, onLogout }) {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [pipelineStatus, setPipelineStatus] = useState(null);
+  const [pipelineMsg, setPipelineMsg] = useState("");
 
   // Load students from API
   useEffect(() => {
@@ -570,21 +648,57 @@ function ClinicalDashboard({ user, onLogout }) {
     // Connect to WebSocket for real-time updates
     wsManager.connect();
     
+    // Individual student record updated
     wsManager.on('student_update', (updatedStudent) => {
       setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
-      if (selected?.id === updatedStudent.id) {
-        setSelected(updatedStudent);
-      }
+      if (selected?.id === updatedStudent.id) setSelected(updatedStudent);
     });
-    
+
+    // Full pipeline run completed
     wsManager.on('pipeline_completed', () => {
-      // Reload students after pipeline completes
+      setPipelineStatus('done');
+      setPipelineMsg('Pipeline complete — predictions refreshed.');
       loadStudents();
+      setTimeout(() => setPipelineStatus(null), 4000);
     });
-    
-    return () => {
-      wsManager.disconnect();
-    };
+
+    // Batch predictions finished
+    wsManager.on('batch_predictions_complete', (data) => {
+      setPipelineStatus('done');
+      setPipelineMsg(`Batch predictions updated for ${data?.processed ?? 'all'} students.`);
+      loadStudents();
+      setTimeout(() => setPipelineStatus(null), 4000);
+    });
+
+    // Model retrained
+    wsManager.on('model_trained', () => {
+      setPipelineStatus('done');
+      setPipelineMsg('Model retrained successfully.');
+      loadStudents();
+      setTimeout(() => setPipelineStatus(null), 4000);
+    });
+
+    // Preprocessing lifecycle
+    wsManager.on('preprocessing_started', () => {
+      setPipelineStatus('running');
+      setPipelineMsg('Data preprocessing started…');
+    });
+    wsManager.on('preprocessing_progress', (data) => {
+      setPipelineStatus('running');
+      setPipelineMsg(data?.message || 'Preprocessing in progress…');
+    });
+    wsManager.on('preprocessing_complete', () => {
+      setPipelineStatus('done');
+      setPipelineMsg('Preprocessing complete.');
+      setTimeout(() => setPipelineStatus(null), 4000);
+    });
+    wsManager.on('preprocessing_failed', (data) => {
+      setPipelineStatus('error');
+      setPipelineMsg(data?.message || 'Preprocessing failed.');
+      setTimeout(() => setPipelineStatus(null), 6000);
+    });
+
+    return () => { wsManager.disconnect(); };
   }, []);
 
   // Set initial selected student when students change
@@ -624,6 +738,15 @@ function ClinicalDashboard({ user, onLogout }) {
     <div style={{minHeight:"100vh",background:"#0A0A12",fontFamily:"'DM Sans',sans-serif",display:"flex",flexDirection:"column"}}>
       <style>{GLOBAL_CSS}</style>
       <AppHeader user={user} onLogout={handleLogout} alertCount={counts.high}/>
+
+      {pipelineStatus && (
+        <div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:pipelineStatus==='error'?"rgba(255,59,48,0.95)":pipelineStatus==='running'?"rgba(99,106,255,0.95)":"rgba(48,209,88,0.95)",color:"#fff",borderRadius:12,padding:"12px 20px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,0.5)",animation:"slideIn 0.3s ease",fontSize:13,fontWeight:500,maxWidth:360}}>
+          {pipelineStatus==='running'
+            ? <div style={{width:14,height:14,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/>
+            : <span>{pipelineStatus==='error'?'⚠':'✓'}</span>}
+          {pipelineMsg}
+        </div>
+      )}
 
       <div style={{background:"rgba(255,255,255,0.02)",borderBottom:"1px solid rgba(255,255,255,0.05)",padding:"10px 28px",display:"flex",gap:8,alignItems:"center"}}>
         {[{key:"all",label:"All Students",count:students.length,color:"rgba(255,255,255,0.6)"},{key:"high",label:"High Risk",count:counts.high,color:"#FF3B30"},{key:"medium",label:"Medium Risk",count:counts.medium,color:"#FF9F0A"},{key:"low",label:"Low Risk",count:counts.low,color:"#30D158"}].map(f=>(
