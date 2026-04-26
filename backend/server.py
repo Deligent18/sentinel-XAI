@@ -108,11 +108,11 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 # IN-MEMORY DATA (Extracted from frontend)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Users with hashed passwords
+# Users with pre-hashed passwords (bcrypt cost=12)
 USERS = [
-    {"username": "counsellor1", "password": pwd_context.hash("Care@2026"), "name": "Dr. Sibanda, N.", "role": "counsellor", "roleLabel": "Mental Health Counsellor"},
-    {"username": "welfare1", "password": pwd_context.hash("Welfare@2026"), "name": "Ms. Choto, R.", "role": "welfare", "roleLabel": "Student Welfare Officer"},
-    {"username": "admin", "password": pwd_context.hash("Admin@2026"), "name": "Mr. Dube, T.", "role": "admin", "roleLabel": "System Administrator"},
+    {"username": "counsellor1", "password": "$2b$12$I6v4YAffh.5hrofCiCe7S.LOcMpJaxErmyOL7l1/giOnY.bsjRIQu", "name": "Dr. Sibanda, N.", "role": "counsellor", "roleLabel": "Mental Health Counsellor"},
+    {"username": "welfare1",    "password": "$2b$12$XIQAxdaTHjayAGcC/pQsueY9xVgHwX8kExYuWXsJ2mk9yszvRncsm", "name": "Ms. Choto, R.",  "role": "welfare",    "roleLabel": "Student Welfare Officer"},
+    {"username": "admin",       "password": "$2b$12$N0mvjhli69CgAgHwMlG.5.EofX6dzgLhMBcy88AOTVtq4sqmDb7o2", "name": "Mr. Dube, T.",  "role": "admin",      "roleLabel": "System Administrator"},
 ]
 
 ROLES = [
@@ -405,8 +405,8 @@ async def get_students(current_user: dict = Depends(get_current_user)):
     """
     global STUDENTS, TRAFFIC_STUDENTS, PREDICTIONS_LOADED
     
-    # ✓ FIX 6.1: Always refresh predictions from ML pipeline
-if not PREDICTIONS_LOADED:
+    # Load predictions once on first request; re-run pipeline explicitly via /pipeline/run
+    if not PREDICTIONS_LOADED:
         loaded_students = load_students_with_predictions()
         if loaded_students:
             STUDENTS = loaded_students
