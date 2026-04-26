@@ -110,71 +110,117 @@ def load_and_merge_data():
     """
     separator("STEP 1 — DATA COLLECTION & INTEGRATION (ETL)")
 
-    connection_str = (
-        f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
-        f"@{DB_CONFIG['host']}/{DB_CONFIG['database']}"
-    )
-    engine = create_engine(connection_str)
-    print("[INFO] Database connection established.")
+    # ── Try MySQL first; fall back to CSV if DB is unavailable (CI mode) ────
+    csv_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'students.csv')
+    csv_path = os.path.normpath(csv_path)
 
-    # ── Load raw tables ──────────────────────────────────────────────────────
-    students = pd.read_sql('SELECT * FROM Student',          engine)
-    lms      = pd.read_sql('SELECT * FROM LMS_Activity',     engine)
-    academic = pd.read_sql('SELECT * FROM Academic_Record',  engine)
-    campus   = pd.read_sql('SELECT * FROM Campus_Behaviour', engine)
-    risk     = pd.read_sql('SELECT StudentID, RiskLabel '
-                           'FROM Risk_Prediction '
-                           'WHERE Reviewed = 1',             engine)
-
-    # ✓ FIX 1.1: Rename SQL columns to Python expectations (PascalCase → snake_case)
-    students.rename(columns={
-        'StudentID': 'StudentID',  # Keep for joins
-        'FullName': 'name',
-        'YearOfStudy': 'year_of_study',
-        'Programme': 'programme',
-        'Gender': 'gender',
-        'EnrolmentStatus': 'enrolment_status'
-    }, inplace=True)
-
-    lms.rename(columns={
-        'LoginFrequency': 'AvgLoginFrequency',
-        'AssignmentsSubmitted': 'TotalSubmitted',
-        'AssignmentsMissed': 'TotalMissed',
-        'ForumParticipation': 'AvgForumActivity',
-        'SessionDurationAvg': 'AvgSessionDuration'
-    }, inplace=True)
-
-    academic.rename(columns={
-        'GPAChange': 'GPAChange'  # Already matches
-    }, inplace=True)
-
-    campus.rename(columns={
-        'AttendanceRate': 'AvgAttendanceRate',
-        'LibraryVisits': 'AvgLibraryVisits',
-        'DiningSwipes': 'AvgDiningSwipes',
-        'LateNightWiFiSessions': 'AvgLateNightSessions',
-        'RecreationFacilityUse': 'AvgRecreationUse'
-    }, inplace=True)
-
-    print(f"[INFO] Loaded: Students={len(students)}, LMS={len(lms)}, "
-          f"Academic={len(academic)}, Campus={len(campus)}, Risk={len(risk)}")
-
-    # ✓ Column validation
-    expected_student_cols = ['StudentID', 'name']
-    missing = [c for c in expected_student_cols if c not in students.columns]
-    if missing:
-        raise ValueError(f"Missing critical Student columns after rename: {missing}")
-
-    # ── Assign semesters to weekly/daily records ──────────────────────────────
-    def to_semester(date_col):
-        return date_col.apply(
-            lambda d: f"{d.year}-S1" if d.month <= 6 else f"{d.year}-S2"
+    try:
+        connection_str = (
+            f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+            f"@{DB_CONFIG['host']}/{DB_CONFIG['database']}"
         )
+        engine = create_engine(connection_str)
+        # Quick connection test
+        with engine.connect():
+            pass
+        print("[INFO] Database connection established.")
+        db_mode = True
+    except Exception as e:
+        print(f"[INFO] MySQL unavailable ({e}) — loading from CSV: {csv_path}")
+        db_mode = False
 
-    lms['WeekOf']         = pd.to_datetime(lms['WeekOf'])
-    campus['RecordDate']  = pd.to_datetime(campus['RecordDate'])
-    lms['Semester']       = to_semester(lms['WeekOf'])
-    campus['Semester']    = to_semester(campus['RecordDate'])
+    if db_mode:
+        # ── Load raw tables from DB ──────────────────────────────────────────
+        students = pd.read_sql('SELECT * FROM Student',          engine)
+        lms      = pd.read_sql('SELECT * FROM LMS_Activity',     engine)
+        academic = pd.read_sql('SELECT * FROM Academic_Record',  engine)
+        campus   = pd.read_sql('SELECT * FROM Campus_Behaviour', engine)
+        risk     = pd.read_sql('SELECT StudentID, RiskLabel '
+                               'FROM Risk_Prediction '
+                               'WHERE Reviewed = 1',             engine)
+
+        # ✓ FIX 1.1: Rename SQL columns to Python expectations
+        students.rename(columns={
+            'StudentID': 'StudentID',
+            'FullName': 'name',
+            'YearOfStudy': 'year_of_study',
+            'Programme': 'programme',
+            'Gender': 'gender',
+            'EnrolmentStatus': 'enrolment_status'
+        }, inplace=True)
+
+        lms.rename(columns={
+            'LoginFrequency': 'AvgLoginFrequency',
+            'AssignmentsSubmitted': 'TotalSubmitted',
+            'AssignmentsMissed': 'TotalMissed',
+            'ForumParticipation': 'AvgForumActivity',
+            'SessionDurationAvg': 'AvgSessionDuration'
+        }, inplace=True)
+
+        academic.rename(columns={'GPAChange': 'GPAChange'}, inplace=True)
+
+        campus.rename(columns={
+            'AttendanceRate': 'AvgAttendanceRate',
+            'LibraryVisits': 'AvgLibraryVisits',
+            'DiningSwipes': 'AvgDiningSwipes',
+            'LateNightWiFiSessions': 'AvgLateNightSessions',
+            'RecreationFacilityUse': 'AvgRecreationUse'
+        }, inplace=True)
+
+        print(f"[INFO] Loaded: Students={len(students)}, LMS={len(lms)}, "
+              f"Academic={len(academic)}, Campus={len(campus)}, Risk={len(risk)}")
+
+        expected_student_cols = ['StudentID', 'name']
+        missing_cols = [c for c in expected_student_cols if c not in students.columns]
+        if missing_cols:
+            raise ValueError(f"Missing critical Student columns after rename: {missing_cols}")
+
+        def to_semester(date_col):
+            return date_col.apply(
+                lambda d: f"{d.year}-S1" if d.month <= 6 else f"{d.year}-S2"
+            )
+
+        lms['WeekOf']        = pd.to_datetime(lms['WeekOf'])
+        campus['RecordDate'] = pd.to_datetime(campus['RecordDate'])
+        lms['Semester']      = to_semester(lms['WeekOf'])
+        campus['Semester']   = to_semester(campus['RecordDate'])
+
+    else:
+        # ── Load from CSV (CI / no-DB mode) ─────────────────────────────────
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(
+                f"CSV not found at {csv_path}. "
+                "Run generate_synthetic_data.py first."
+            )
+        raw = pd.read_csv(csv_path)
+        print(f"[INFO] Loaded {len(raw)} rows from CSV: {csv_path}")
+
+        # Map CSV columns to the unified df schema that engineer_features expects
+        df = pd.DataFrame({
+            'StudentID':             raw['student_id'],
+            'name':                  raw['name'],
+            'programme':             raw['programme'],
+            'year_of_study':         raw['year'],
+            'GPA':                   raw[['gpa_sem1','gpa_sem2','gpa_sem3']].mean(axis=1),
+            'GPAChange':             raw['gpa_sem3'] - raw['gpa_sem1'],
+            'CreditCompletion':      raw.get('assignment_submissions', pd.Series([0]*len(raw))),
+            'AvgAttendanceRate':     raw['attendance'],
+            'AvgLoginFrequency':     raw['lms_logins'],
+            'AvgLibraryVisits':      raw['library_visits'],
+            'AvgLateNightSessions':  raw['after_hours_wifi'],
+            'TotalSubmitted':        raw['assignment_submissions'],
+            'TotalMissed':           (10 - raw['assignment_submissions'].clip(0, 10)),
+            'AvgForumActivity':      raw['lms_logins'] * 0.3,
+            'AvgSessionDuration':    raw['lms_logins'] * 5,
+            'TotalDownloads':        raw['lms_logins'] * 2,
+            'TotalQuizAttempts':     raw['assignment_submissions'] * 0.8,
+            'AvgDiningSwipes':       pd.Series([3.0] * len(raw)),
+            'AvgRecreationUse':      raw['facility_access'],
+            'Semester':              '2024-S1',
+            'RiskLabel':             raw['risk_label'].str.capitalize(),
+        })
+        print(f"[INFO] CSV mode — built unified df shape: {df.shape}")
+        return df
 
     # ── Aggregate LMS to semester level ──────────────────────────────────────
     lms_sem = lms.groupby(['StudentID', 'Semester']).agg(

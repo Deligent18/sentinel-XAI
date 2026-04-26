@@ -1010,6 +1010,85 @@ def insert_data_to_db(data):
 # MAIN EXECUTION
 # =============================================================================
 
+def export_to_csv(data):
+    """
+    Export generated data to backend/data/students.csv so the ML pipeline
+    can run without a MySQL database (used in CI and standalone mode).
+    """
+    import csv, os
+    out_dir = os.path.join(os.path.dirname(__file__), 'backend', 'data')
+    os.makedirs(out_dir, out_dir_exists_ok := True) if False else os.makedirs(out_dir, exist_ok=True)
+
+    students      = {s['StudentID']: s for s in data['students']}
+    academic      = data['academic_records']
+    campus_list   = data['campus_behaviours']
+    lms_list      = data['lms_activities']
+    risk_preds    = {r['StudentID']: r for r in data.get('risk_predictions', [])}
+
+    # Build per-student aggregates from campus and LMS records
+    from collections import defaultdict
+    campus_agg = defaultdict(lambda: {'attendance': [], 'library': [], 'after_hours': []})
+    for c in campus_list:
+        sid = c['StudentID']
+        campus_agg[sid]['attendance'].append(c.get('AttendanceRate', 0))
+        campus_agg[sid]['library'].append(c.get('LibraryVisits', 0))
+        campus_agg[sid]['after_hours'].append(c.get('LateNightWiFiSessions', 0))
+
+    lms_agg = defaultdict(lambda: {'logins': [], 'assignments': []})
+    for l in lms_list:
+        sid = l['StudentID']
+        lms_agg[sid]['logins'].append(l.get('LoginFrequency', 0))
+        lms_agg[sid]['assignments'].append(l.get('AssignmentsSubmitted', 0))
+
+    # Build per-student GPA across semesters from academic records
+    gpa_agg = defaultdict(list)
+    for a in academic:
+        gpa_agg[a['StudentID']].append(a.get('GPA', 0))
+
+    out_path = os.path.join(out_dir, 'students.csv')
+    fieldnames = [
+        'student_id', 'name', 'programme', 'year',
+        'gpa_sem1', 'gpa_sem2', 'gpa_sem3',
+        'attendance', 'lms_logins', 'facility_access',
+        'library_visits', 'after_hours_wifi', 'assignment_submissions',
+        'risk_label',
+    ]
+
+    avg = lambda lst: round(sum(lst) / len(lst), 4) if lst else 0
+    idx = lambda lst, i: lst[i] if len(lst) > i else (lst[-1] if lst else 0)
+
+    with open(out_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        written = 0
+        for sid, s in students.items():
+            gpas   = gpa_agg.get(sid, [0, 0, 0])
+            ca     = campus_agg.get(sid, {'attendance': [0], 'library': [0], 'after_hours': [0]})
+            la     = lms_agg.get(sid, {'logins': [0], 'assignments': [0]})
+            rp     = risk_preds.get(sid, {})
+            risk   = rp.get('RiskLabel', s.get('RiskLabel', 'low'))
+            writer.writerow({
+                'student_id':            s['StudentID'],
+                'name':                  s['FullName'],
+                'programme':             s['Programme'],
+                'year':                  s['YearOfStudy'],
+                'gpa_sem1':              idx(gpas, 0),
+                'gpa_sem2':              idx(gpas, 1),
+                'gpa_sem3':              idx(gpas, 2),
+                'attendance':            round(avg(ca['attendance']), 2),
+                'lms_logins':            round(avg(la['logins']), 2),
+                'facility_access':       round(avg(ca['attendance']) / 10, 2),
+                'library_visits':        round(avg(ca['library']), 2),
+                'after_hours_wifi':      round(avg(ca['after_hours']), 2),
+                'assignment_submissions':round(avg(la['assignments']), 2),
+                'risk_label':            risk.lower(),
+            })
+            written += 1
+
+    print(f"[CSV] Exported {written} students → {out_path}")
+    return out_path
+
+
 def main():
     """Main function to generate and insert synthetic data."""
     
@@ -1030,17 +1109,33 @@ def main():
     
     # Generate all data
     data = generate_all_data()
-    
-    # Insert into database
-    success = insert_data_to_db(data)
-    
+
+    # Always export CSV (works with and without a DB)
+    csv_path = export_to_csv(data)
+    print(f"[INFO] CSV export ready: {csv_path}")
+
+    # Try to insert into database — skip gracefully if unavailable
+    db_available = False
+    try:
+        import mysql.connector
+        test_conn = mysql.connector.connect(**DB_CONFIG)
+        test_conn.close()
+        db_available = True
+    except Exception as e:
+        print(f"[INFO] MySQL not available ({e}) — skipping DB insertion, CSV only.")
+
+    if db_available:
+        success = insert_data_to_db(data)
+        if success:
+            print("\n[SUCCESS] Synthetic data generation and DB insertion complete!")
+        else:
+            print("\n[WARNING] DB insertion failed — CSV export still available.")
+    else:
+        success = True  # CSV export succeeded
+
     if success:
-        print("\n[SUCCESS] Synthetic data generation and insertion complete!")
         print("\nYou can now run data_preprocessing.py to preprocess the data")
         print("and train your ML models.")
-    else:
-        print("\n[FAILED] There was an error inserting data into the database.")
-        print("Please check your database configuration and try again.")
     
     return success
 
