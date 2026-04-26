@@ -64,14 +64,8 @@ CONTINUOUS_COLS = [
 ]
 
 # Numerical columns used for imputation
-# ✓ FIX 2.2: DYNAMIC feature lists from loaded data (handles missing columns)
-NUMERICAL_COLS = [c for c in df.select_dtypes(include=['number']).columns 
-                  if c not in ['StudentID', 'ActivityID', 'RecordID']]
-CATEGORICAL_COLS = [c for c in df.select_dtypes(include=['object']).columns 
-                    if c not in ['StudentID']]
-
-print(f"[INFO] Dynamic NUMERICAL_COLS ({len(NUMERICAL_COLS)}): {NUMERICAL_COLS[:5]}...")
-print(f"[INFO] Dynamic CATEGORICAL_COLS ({len(CATEGORICAL_COLS)}): {CATEGORICAL_COLS}")
+# NUMERICAL_COLS and CATEGORICAL_COLS are computed dynamically inside
+# clean_data(df) from the actual loaded dataframe — not at module level.
 
 OUTLIER_COLS = [
     'AvgLoginFrequency', 'TotalMissed', 'AvgSessionDuration',
@@ -123,64 +117,64 @@ def load_and_merge_data():
     engine = create_engine(connection_str)
     print("[INFO] Database connection established.")
 
-# ── Load raw tables ──────────────────────────────────────────────────────
-students = pd.read_sql('SELECT * FROM Student',          engine)
-lms      = pd.read_sql('SELECT * FROM LMS_Activity',     engine)
-academic = pd.read_sql('SELECT * FROM Academic_Record',  engine)
-campus   = pd.read_sql('SELECT * FROM Campus_Behaviour', engine)
-risk     = pd.read_sql('SELECT StudentID, RiskLabel '
-                       'FROM Risk_Prediction '
-                       'WHERE Reviewed = 1',             engine)
+    # ── Load raw tables ──────────────────────────────────────────────────────
+    students = pd.read_sql('SELECT * FROM Student',          engine)
+    lms      = pd.read_sql('SELECT * FROM LMS_Activity',     engine)
+    academic = pd.read_sql('SELECT * FROM Academic_Record',  engine)
+    campus   = pd.read_sql('SELECT * FROM Campus_Behaviour', engine)
+    risk     = pd.read_sql('SELECT StudentID, RiskLabel '
+                           'FROM Risk_Prediction '
+                           'WHERE Reviewed = 1',             engine)
 
-# ✓ FIX 1.1: Rename SQL columns to Python expectations (PascalCase → snake_case)
-students.rename(columns={
-    'StudentID': 'StudentID',  # Keep for joins
-    'FullName': 'name',
-    'YearOfStudy': 'year_of_study',
-    'Programme': 'programme',
-    'Gender': 'gender',
-    'EnrolmentStatus': 'enrolment_status'
-}, inplace=True)
+    # ✓ FIX 1.1: Rename SQL columns to Python expectations (PascalCase → snake_case)
+    students.rename(columns={
+        'StudentID': 'StudentID',  # Keep for joins
+        'FullName': 'name',
+        'YearOfStudy': 'year_of_study',
+        'Programme': 'programme',
+        'Gender': 'gender',
+        'EnrolmentStatus': 'enrolment_status'
+    }, inplace=True)
 
-lms.rename(columns={
-    'LoginFrequency': 'AvgLoginFrequency',
-    'AssignmentsSubmitted': 'TotalSubmitted',
-    'AssignmentsMissed': 'TotalMissed',
-    'ForumParticipation': 'AvgForumActivity',
-    'SessionDurationAvg': 'AvgSessionDuration'
-}, inplace=True)
+    lms.rename(columns={
+        'LoginFrequency': 'AvgLoginFrequency',
+        'AssignmentsSubmitted': 'TotalSubmitted',
+        'AssignmentsMissed': 'TotalMissed',
+        'ForumParticipation': 'AvgForumActivity',
+        'SessionDurationAvg': 'AvgSessionDuration'
+    }, inplace=True)
 
-academic.rename(columns={
-    'GPAChange': 'GPAChange'  # Already matches
-}, inplace=True)
+    academic.rename(columns={
+        'GPAChange': 'GPAChange'  # Already matches
+    }, inplace=True)
 
-campus.rename(columns={
-    'AttendanceRate': 'AvgAttendanceRate',
-    'LibraryVisits': 'AvgLibraryVisits',
-    'DiningSwipes': 'AvgDiningSwipes',
-    'LateNightWiFiSessions': 'AvgLateNightSessions',
-    'RecreationFacilityUse': 'AvgRecreationUse'
-}, inplace=True)
+    campus.rename(columns={
+        'AttendanceRate': 'AvgAttendanceRate',
+        'LibraryVisits': 'AvgLibraryVisits',
+        'DiningSwipes': 'AvgDiningSwipes',
+        'LateNightWiFiSessions': 'AvgLateNightSessions',
+        'RecreationFacilityUse': 'AvgRecreationUse'
+    }, inplace=True)
 
-print(f"[INFO] Loaded: Students={len(students)}, LMS={len(lms)}, "
-      f"Academic={len(academic)}, Campus={len(campus)}, Risk={len(risk)}")
+    print(f"[INFO] Loaded: Students={len(students)}, LMS={len(lms)}, "
+          f"Academic={len(academic)}, Campus={len(campus)}, Risk={len(risk)}")
 
-# ✓ Column validation
-expected_student_cols = ['StudentID', 'name']
-missing = [c for c in expected_student_cols if c not in students.columns]
-if missing:
-    raise ValueError(f"Missing critical Student columns after rename: {missing}")
+    # ✓ Column validation
+    expected_student_cols = ['StudentID', 'name']
+    missing = [c for c in expected_student_cols if c not in students.columns]
+    if missing:
+        raise ValueError(f"Missing critical Student columns after rename: {missing}")
 
-# ── Assign semesters to weekly/daily records ──────────────────────────────
-def to_semester(date_col):
-    return date_col.apply(
-        lambda d: f"{d.year}-S1" if d.month <= 6 else f"{d.year}-S2"
-    )
+    # ── Assign semesters to weekly/daily records ──────────────────────────────
+    def to_semester(date_col):
+        return date_col.apply(
+            lambda d: f"{d.year}-S1" if d.month <= 6 else f"{d.year}-S2"
+        )
 
-lms['WeekOf']         = pd.to_datetime(lms['WeekOf'])
-campus['RecordDate']  = pd.to_datetime(campus['RecordDate'])
-lms['Semester']       = to_semester(lms['WeekOf'])
-campus['Semester']    = to_semester(campus['RecordDate'])
+    lms['WeekOf']         = pd.to_datetime(lms['WeekOf'])
+    campus['RecordDate']  = pd.to_datetime(campus['RecordDate'])
+    lms['Semester']       = to_semester(lms['WeekOf'])
+    campus['Semester']    = to_semester(campus['RecordDate'])
 
     # ── Aggregate LMS to semester level ──────────────────────────────────────
     lms_sem = lms.groupby(['StudentID', 'Semester']).agg(
@@ -235,6 +229,14 @@ def clean_data(df):
     """
     separator("STEP 2 — DATA CLEANING")
 
+    # Compute feature lists dynamically from the actual loaded dataframe
+    numerical_cols   = [c for c in df.select_dtypes(include=['number']).columns
+                        if c not in ['StudentID', 'ActivityID', 'RecordID']]
+    categorical_cols = [c for c in df.select_dtypes(include=['object']).columns
+                        if c not in ['StudentID']]
+    print(f"[INFO] Dynamic NUMERICAL_COLS ({len(numerical_cols)}): {numerical_cols[:5]}…")
+    print(f"[INFO] Dynamic CATEGORICAL_COLS ({len(categorical_cols)}): {categorical_cols}")
+
     # ── 2.1 Missing Value Report ──────────────────────────────────────────────
     missing     = df.isnull().sum()
     missing_pct = (missing / len(df) * 100).round(2)
@@ -256,14 +258,14 @@ def clean_data(df):
 
     # ── 2.2 Impute Missing Values ─────────────────────────────────────────────
     # Numerical: median (robust to outliers and skewed distributions)
-    existing_num = [c for c in NUMERICAL_COLS if c in df.columns]
+    existing_num = [c for c in numerical_cols if c in df.columns]
     if existing_num:
         num_imp = SimpleImputer(strategy='median')
         df[existing_num] = num_imp.fit_transform(df[existing_num])
         joblib.dump(num_imp, f'{DIR_MODELS}/num_imputer.pkl')
 
     # Categorical: most frequent (mode)
-    existing_cat = [c for c in CATEGORICAL_COLS if c in df.columns]
+    existing_cat = [c for c in categorical_cols if c in df.columns]
     if existing_cat:
         cat_imp = SimpleImputer(strategy='most_frequent')
         df[existing_cat] = cat_imp.fit_transform(df[existing_cat])
@@ -319,6 +321,9 @@ def run_eda(df):
     """
     separator("STEP 3 — EXPLORATORY DATA ANALYSIS (EDA)")
 
+    numerical_cols = [c for c in df.select_dtypes(include=['number']).columns
+                      if c not in ['StudentID', 'ActivityID', 'RecordID']]
+
     palette = {
         'High'  : '#FF6B6B',
         'Medium': '#FFA500',
@@ -346,7 +351,7 @@ def run_eda(df):
     save_plot(fig, 'class_distribution.png')
 
     # ── 3.2 Feature Distributions ─────────────────────────────────────────────
-    plot_cols = [c for c in NUMERICAL_COLS if c in df.columns][:9]
+    plot_cols = [c for c in numerical_cols if c in df.columns][:9]
     fig, axes = plt.subplots(3, 3, figsize=(16, 10))
     fig.suptitle('Feature Distributions', fontsize=14, fontweight='bold', y=1.01)
     for ax, col in zip(axes.flatten(), plot_cols):
@@ -359,7 +364,7 @@ def run_eda(df):
     save_plot(fig, 'feature_distributions.png')
 
     # ── 3.3 Correlation Heatmap ───────────────────────────────────────────────
-    corr_cols = [c for c in NUMERICAL_COLS if c in df.columns]
+    corr_cols = [c for c in numerical_cols if c in df.columns]
     fig, ax   = plt.subplots(figsize=(14, 10))
     corr      = df[corr_cols].corr()
     mask      = np.triu(np.ones_like(corr, dtype=bool))
