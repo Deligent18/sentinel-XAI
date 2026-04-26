@@ -353,7 +353,7 @@ jobs:
           BASE = "http://localhost:8000"
           roles = [
             ("counsellor1","Care@2026","counsellor"),
-            ("welfare1","Care@2026","welfare"),
+            ("welfare1","Welfare@2026","welfare"),
             ("admin","Admin@2026","admin"),
           ]
           for username, password, role in roles:
