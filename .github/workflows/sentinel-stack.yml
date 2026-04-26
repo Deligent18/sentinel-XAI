@@ -1,181 +1,155 @@
-name: Sentinel XAI — Full Stack
+name: Sentinel XAI - Full Stack
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main]
-  workflow_dispatch:          # allow manual trigger from GitHub UI
+  workflow_dispatch:
 
-# ── Shared environment ────────────────────────────────────────────────────────
 env:
   PYTHON_VERSION: "3.11"
-  NODE_VERSION:   "20"
-  BACKEND_PORT:   "8000"
-  FRONTEND_PORT:  "3000"
+  NODE_VERSION: "20"
+  BACKEND_PORT: "8000"
+  FRONTEND_PORT: "3000"
 
-# ─────────────────────────────────────────────────────────────────────────────
 jobs:
 
 # ── 1. BACKEND ────────────────────────────────────────────────────────────────
   backend:
-    name: 🐍 Backend (FastAPI + ML pipeline)
+    name: Backend (FastAPI + ML pipeline)
     runs-on: ubuntu-latest
-
     steps:
-      # ── Checkout ──────────────────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ── Python setup ──────────────────────────────────────────────────────
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      # ── Install dependencies ───────────────────────────────────────────────
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      # ── Lint ──────────────────────────────────────────────────────────────
       - name: Lint (flake8)
         run: |
           pip install flake8
-          flake8 backend/ --max-line-length=120 --exclude=__pycache__ \
-            --count --statistics || true
+          flake8 backend/ --max-line-length=120 --exclude=__pycache__ --count --statistics || true
 
-      # ── Syntax check all root ML scripts ──────────────────────────────────
-      - name: Syntax check ML pipeline scripts
+      - name: Syntax check ML scripts
         run: |
           python -m py_compile generate_synthetic_data.py
           python -m py_compile data_preprocessing.py
           python -m py_compile model_training.py
           python -m py_compile model_evaluation.py
           python -m py_compile shap_generation.py
-          echo "✅ All root scripts pass syntax check"
+          echo "All root scripts pass syntax check"
 
-      # ── Prepare data & trained model ──────────────────────────────────────
       - name: Generate synthetic student data
         run: |
           mkdir -p backend/data data/processed models plots reports
           python generate_synthetic_data.py
-          echo "✅ Synthetic data generated"
           ls -lh backend/data/
 
       - name: Run data preprocessing
         run: |
           python data_preprocessing.py 2>&1 | tee reports/preprocessing.log
-          echo "✅ Preprocessing complete"
           ls -lh data/processed/ models/ || true
 
       - name: Train ML model (XGBoost)
         run: |
           python model_training.py 2>&1 | tee reports/training.log
-          echo "✅ Model training complete"
           ls -lh models/ || true
 
-      # ── Start backend server ───────────────────────────────────────────────
       - name: Start FastAPI backend
         run: |
           cd backend
-          uvicorn server:app \
-            --host 0.0.0.0 \
-            --port ${{ env.BACKEND_PORT }} \
-            --log-level info \
-            --timeout-graceful-shutdown 5 &
-          echo "BACKEND_PID=$!" >> $GITHUB_ENV
-          echo "Waiting for backend to be ready…"
+          uvicorn server:app --host 0.0.0.0 --port ${{ env.BACKEND_PORT }} --log-level info &
+          echo "Waiting for backend to be ready..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:${{ env.BACKEND_PORT }}/health > /dev/null 2>&1; then
-              echo "✅ Backend is up after ${i}s"
+              echo "Backend is up after ${i}s"
               break
             fi
             sleep 1
           done
         env:
-          SECRET_KEY:   ${{ secrets.SECRET_KEY || 'ci-dev-secret-key-sentinel-xai-2026' }}
-          ENVIRONMENT:  ci
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'ci-dev-secret-key-sentinel-xai-2026' }}
+          ENVIRONMENT: ci
 
-      # ── API smoke tests ────────────────────────────────────────────────────
-      - name: API smoke test — GET /health
+      - name: API test - GET /health
         run: |
           response=$(curl -sf http://localhost:${{ env.BACKEND_PORT }}/health)
-          echo "Health response: $response"
+          echo "Health: $response"
           echo "$response" | python -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', f'unexpected: {d}'"
-          echo "✅ /health OK"
+          echo "/health OK"
 
-      - name: API smoke test — GET /roles
+      - name: API test - GET /roles
         run: |
           response=$(curl -sf http://localhost:${{ env.BACKEND_PORT }}/roles)
-          echo "Roles response: $response"
-          echo "$response" | python -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list) and len(d)>0, 'empty roles'"
-          echo "✅ /roles OK"
+          echo "Roles: $response"
+          echo "$response" | python -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list) and len(d)>0"
+          echo "/roles OK"
 
-      - name: API smoke test — POST /login (counsellor)
+      - name: API test - POST /login
         run: |
           response=$(curl -sf -X POST http://localhost:${{ env.BACKEND_PORT }}/login \
             -H "Content-Type: application/json" \
             -d '{"username":"counsellor1","password":"Care@2026","role":"counsellor"}')
-          echo "Login response: $response"
-          TOKEN=$(echo "$response" | python -c "import sys,json; d=json.load(sys.stdin); print(d['access_token'])")
+          echo "Login: $response"
+          TOKEN=$(echo "$response" | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
           echo "TOKEN=$TOKEN" >> $GITHUB_ENV
-          # Verify enriched fields are present
           echo "$response" | python -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          assert 'access_token' in d, 'missing access_token'
-          assert 'name'         in d, 'missing name'
-          assert 'role'         in d, 'missing role'
-          assert 'roleLabel'    in d, 'missing roleLabel'
-          print('✅ /login returns all required fields')
+          import sys,json
+          d=json.load(sys.stdin)
+          for f in ['access_token','name','role','roleLabel']:
+            assert f in d, f'missing {f}'
+          print('Login returns all required fields')
           "
 
-      - name: API smoke test — GET /students (authenticated)
+      - name: API test - GET /students
         run: |
           response=$(curl -sf http://localhost:${{ env.BACKEND_PORT }}/students \
             -H "Authorization: Bearer $TOKEN")
-          echo "Students response (truncated): $(echo "$response" | head -c 300)"
           echo "$response" | python -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          assert isinstance(d, list), 'expected list'
-          assert len(d) > 0,         'student list is empty'
-          s = d[0]
-          for field in ['id','name','programme','year','gpa','attendance','risk','tier']:
-              assert field in s, f'missing field: {field}'
-          print(f'✅ /students OK — {len(d)} students, all required fields present')
+          import sys,json
+          d=json.load(sys.stdin)
+          assert isinstance(d,list) and len(d)>0
+          s=d[0]
+          for f in ['id','name','programme','year','gpa','attendance','risk','tier']:
+            assert f in s, f'missing {f}'
+          print(f'/students OK - {len(d)} students')
           "
 
-      - name: API smoke test — POST /students/batch (route ordering fix)
+      - name: API test - POST /students/batch (route ordering fix)
         run: |
           status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             http://localhost:${{ env.BACKEND_PORT }}/students/batch \
             -H "Authorization: Bearer $TOKEN")
-          # 200 = success, 503 = ML unavailable — either is fine; 404 means shadowed
           echo "Batch route HTTP status: $status"
           python -c "
-          status = $status
-          assert status != 404, f'❌ /students/batch is returning 404 — route ordering bug still present (got {status})'
-          print(f'✅ /students/batch reachable (HTTP {status})')
+          s=$status
+          assert s!=404, f'/students/batch returns 404 - route ordering bug still present'
+          print(f'/students/batch reachable - HTTP {s}')
           "
 
-      - name: API smoke test — GET /stats (authenticated)
+      - name: API test - GET /stats
         run: |
           response=$(curl -sf http://localhost:${{ env.BACKEND_PORT }}/stats \
             -H "Authorization: Bearer $TOKEN")
           echo "Stats: $response"
           echo "$response" | python -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          assert 'totalStudents' in d or 'total_students' in d, 'missing totalStudents'
-          print('✅ /stats OK')
+          import sys,json
+          d=json.load(sys.stdin)
+          assert 'totalStudents' in d or 'total_students' in d
+          print('/stats OK')
           "
 
-      - name: API smoke test — GET /users (admin login)
+      - name: API test - GET /users (admin)
         run: |
           admin_token=$(curl -sf -X POST http://localhost:${{ env.BACKEND_PORT }}/login \
             -H "Content-Type: application/json" \
@@ -183,30 +157,24 @@ jobs:
             | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
           response=$(curl -sf http://localhost:${{ env.BACKEND_PORT }}/users \
             -H "Authorization: Bearer $admin_token")
-          echo "Users: $response"
           echo "$response" | python -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          assert isinstance(d, list) and len(d) > 0, 'empty users list'
-          print(f'✅ /users OK — {len(d)} users')
+          import sys,json
+          d=json.load(sys.stdin)
+          assert isinstance(d,list) and len(d)>0
+          print(f'/users OK - {len(d)} users')
           "
 
-      - name: API smoke test — WebSocket /ws connects
+      - name: API test - WebSocket /ws connects
         run: |
           pip install websockets
           python - <<'EOF'
-          import asyncio, websockets, json
-
-          async def test_ws():
-              uri = "ws://localhost:${{ env.BACKEND_PORT }}/ws"
-              async with websockets.connect(uri, open_timeout=5) as ws:
-                  # Just confirm handshake completes
-                  print("✅ WebSocket /ws connected successfully")
-
-          asyncio.run(test_ws())
+          import asyncio, websockets
+          async def test():
+            async with websockets.connect("ws://localhost:${{ env.BACKEND_PORT }}/ws", open_timeout=5) as ws:
+              print("WebSocket /ws connected successfully")
+          asyncio.run(test())
           EOF
 
-      # ── Upload backend logs ────────────────────────────────────────────────
       - name: Upload backend artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -218,17 +186,15 @@ jobs:
             backend/data/
           retention-days: 7
 
-
 # ── 2. FRONTEND ───────────────────────────────────────────────────────────────
   frontend:
-    name: ⚛️  Frontend (React + Vite)
+    name: Frontend (React + Vite)
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -238,7 +204,7 @@ jobs:
       - name: Install frontend dependencies
         run: cd frontend && npm ci
 
-      - name: Type / lint check (ESLint if configured)
+      - name: Lint (ESLint)
         run: cd frontend && npx eslint . --ext .js,.jsx --max-warnings=50 || true
 
       - name: Build frontend (production)
@@ -249,7 +215,7 @@ jobs:
       - name: Verify build output
         run: |
           ls -lh frontend/dist/
-          test -f frontend/dist/index.html && echo "✅ index.html present"
+          test -f frontend/dist/index.html && echo "index.html present"
           du -sh frontend/dist/
 
       - name: Upload frontend build artifact
@@ -259,40 +225,35 @@ jobs:
           path: frontend/dist/
           retention-days: 7
 
-
-# ── 3. INTEGRATION  (backend + frontend together) ─────────────────────────────
+# ── 3. INTEGRATION ────────────────────────────────────────────────────────────
   integration:
-    name: 🔗 Integration (Full Stack)
+    name: Integration (Full Stack)
     runs-on: ubuntu-latest
     needs: [backend, frontend]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ── Restore built frontend ─────────────────────────────────────────────
       - name: Download frontend build
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: frontend/dist/
 
-      # ── Restore trained model / data ───────────────────────────────────────
       - name: Download backend artifacts
         uses: actions/download-artifact@v4
         with:
           name: backend-artifacts
           path: .
 
-      # ── Python + Node setup ────────────────────────────────────────────────
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -302,127 +263,100 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Install frontend serve tool
+      - name: Install serve
         run: npm install -g serve
 
-      # ── Start backend ──────────────────────────────────────────────────────
       - name: Start FastAPI backend
         run: |
           cd backend
-          uvicorn server:app \
-            --host 0.0.0.0 \
-            --port ${{ env.BACKEND_PORT }} \
-            --log-level info &
-          echo "Waiting for backend…"
+          uvicorn server:app --host 0.0.0.0 --port ${{ env.BACKEND_PORT }} --log-level info &
           for i in $(seq 1 30); do
             curl -sf http://localhost:${{ env.BACKEND_PORT }}/health && break || sleep 1
           done
-          echo "✅ Backend ready"
+          echo "Backend ready"
         env:
-          SECRET_KEY:   ${{ secrets.SECRET_KEY || 'ci-integration-secret-2026' }}
-          ENVIRONMENT:  ci
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'ci-integration-secret-2026' }}
+          ENVIRONMENT: ci
 
-      # ── Serve built frontend ───────────────────────────────────────────────
       - name: Serve built frontend
         run: |
           serve -s frontend/dist -l ${{ env.FRONTEND_PORT }} &
-          echo "Waiting for frontend…"
           for i in $(seq 1 20); do
             curl -sf http://localhost:${{ env.FRONTEND_PORT }} > /dev/null && break || sleep 1
           done
-          echo "✅ Frontend served"
+          echo "Frontend ready"
 
-      # ── Integration checks ─────────────────────────────────────────────────
-      - name: Integration — Frontend is reachable
+      - name: Integration - Frontend is reachable
         run: |
           status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${{ env.FRONTEND_PORT }})
           echo "Frontend HTTP status: $status"
-          test "$status" = "200" && echo "✅ Frontend serving at port ${{ env.FRONTEND_PORT }}"
+          test "$status" = "200" && echo "Frontend serving OK"
 
-      - name: Integration — API CORS headers present
+      - name: Integration - API CORS headers present
         run: |
           headers=$(curl -si -X OPTIONS \
             http://localhost:${{ env.BACKEND_PORT }}/health \
             -H "Origin: http://localhost:${{ env.FRONTEND_PORT }}" \
             -H "Access-Control-Request-Method: GET")
-          echo "$headers"
           echo "$headers" | grep -qi "access-control-allow" \
-            && echo "✅ CORS headers present" \
-            || echo "⚠️  CORS headers not detected — check middleware config"
+            && echo "CORS headers present" \
+            || echo "CORS headers not detected - check middleware config"
 
-      - name: Integration — Full login → fetch students flow
+      - name: Integration - Full login to students flow
         run: |
           python - <<'PYEOF'
           import urllib.request, json
-
-          BASE = "http://localhost:${{ env.BACKEND_PORT }}"
-
-          # 1. Login
+          BASE = "http://localhost:8000"
           req = urllib.request.Request(
-              f"{BASE}/login",
-              data=json.dumps({"username":"counsellor1","password":"Care@2026","role":"counsellor"}).encode(),
-              headers={"Content-Type": "application/json"},
-              method="POST"
+            f"{BASE}/login",
+            data=json.dumps({"username":"counsellor1","password":"Care@2026","role":"counsellor"}).encode(),
+            headers={"Content-Type":"application/json"}, method="POST"
           )
           with urllib.request.urlopen(req) as r:
-              login = json.load(r)
+            login = json.load(r)
           token = login["access_token"]
-          assert login.get("name"),      "Login missing 'name'"
-          assert login.get("roleLabel"), "Login missing 'roleLabel'"
-          print(f"  Logged in as: {login['name']} ({login['roleLabel']})")
-
-          # 2. Fetch students
-          req = urllib.request.Request(
-              f"{BASE}/students",
-              headers={"Authorization": f"Bearer {token}"}
-          )
+          assert login.get("name"),      "Login missing name"
+          assert login.get("roleLabel"), "Login missing roleLabel"
+          print(f"Logged in as: {login['name']} ({login['roleLabel']})")
+          req = urllib.request.Request(f"{BASE}/students", headers={"Authorization":f"Bearer {token}"})
           with urllib.request.urlopen(req) as r:
-              students = json.load(r)
-          assert len(students) > 0, "Student list is empty"
-          s = students[0]
-          for field in ["id","name","programme","year","gpa","attendance","risk","tier"]:
-              assert field in s, f"Student missing field: {field}"
-          print(f"  Students loaded: {len(students)} — fields OK")
-
-          # 3. Fetch stats
-          req = urllib.request.Request(
-              f"{BASE}/stats",
-              headers={"Authorization": f"Bearer {token}"}
-          )
+            students = json.load(r)
+          assert len(students) > 0
+          for f in ["id","name","programme","year","gpa","attendance","risk","tier"]:
+            assert f in students[0], f"Missing field: {f}"
+          print(f"Students loaded: {len(students)} - all fields OK")
+          req = urllib.request.Request(f"{BASE}/stats", headers={"Authorization":f"Bearer {token}"})
           with urllib.request.urlopen(req) as r:
-              stats = json.load(r)
-          print(f"  Stats: {stats}")
-
-          print("✅ Full login → students → stats flow passed")
+            stats = json.load(r)
+          print(f"Stats: {stats}")
+          print("Full login to students to stats flow passed")
           PYEOF
 
-      - name: Integration — API returns enriched login fields (Fix 3)
+      - name: Integration - All roles return enriched login fields
         run: |
           python - <<'PYEOF'
           import urllib.request, json
-
-          BASE = "http://localhost:${{ env.BACKEND_PORT }}"
+          BASE = "http://localhost:8000"
           roles = [
-            ("counsellor1", "Care@2026",  "counsellor"),
-            ("welfare1",    "Care@2026",  "welfare"),
-            ("admin",       "Admin@2026", "admin"),
+            ("counsellor1","Care@2026","counsellor"),
+            ("welfare1","Care@2026","welfare"),
+            ("admin","Admin@2026","admin"),
           ]
           for username, password, role in roles:
-              req = urllib.request.Request(
-                  f"{BASE}/login",
-                  data=json.dumps({"username":username,"password":password,"role":role}).encode(),
-                  headers={"Content-Type":"application/json"},
-                  method="POST"
-              )
-              with urllib.request.urlopen(req) as r:
-                  d = json.load(r)
-              for field in ["access_token","name","role","roleLabel","username"]:
-                  assert field in d, f"Login for {username} missing '{field}'"
-              print(f"  ✅ {username} ({role}): name='{d['name']}' roleLabel='{d['roleLabel']}'")
-          print("✅ All roles return enriched login fields")
+            req = urllib.request.Request(
+              f"{BASE}/login",
+              data=json.dumps({"username":username,"password":password,"role":role}).encode(),
+              headers={"Content-Type":"application/json"}, method="POST"
+            )
+            with urllib.request.urlopen(req) as r:
+              d = json.load(r)
+            for field in ["access_token","name","role","roleLabel","username"]:
+              assert field in d, f"Login for {username} missing {field}"
+            print(f"{username} ({role}): name={d['name']} roleLabel={d['roleLabel']}")
+          print("All roles return enriched login fields")
           PYEOF
 
-      - name: Integration — /students/batch not shadowed by wildcard (Fix 1)
+      - name: Integration - /students/batch not shadowed
         run: |
           token=$(curl -sf -X POST http://localhost:${{ env.BACKEND_PORT }}/login \
             -H "Content-Type: application/json" \
@@ -433,39 +367,35 @@ jobs:
             -H "Authorization: Bearer $token")
           echo "Batch route status: $status"
           python -c "
-          s = $status
-          assert s != 404, f'❌ Route ordering bug — /students/batch returns 404 (got {s})'
-          print(f'✅ /students/batch reachable — HTTP {s}')
+          s=$status
+          assert s!=404, f'Route ordering bug - /students/batch returns 404'
+          print(f'/students/batch reachable - HTTP {s}')
           "
-
 
 # ── 4. SUMMARY ────────────────────────────────────────────────────────────────
   summary:
-    name: 📋 Pipeline Summary
+    name: Pipeline Summary
     runs-on: ubuntu-latest
     needs: [backend, frontend, integration]
     if: always()
-
     steps:
       - name: Print results
         run: |
-          echo "╔══════════════════════════════════════════════╗"
-          echo "║    Sentinel XAI — Full Stack CI Summary      ║"
-          echo "╠══════════════════════════════════════════════╣"
-          echo "║  Backend  (FastAPI + ML)  : ${{ needs.backend.result     }}"
-          echo "║  Frontend (React + Vite)  : ${{ needs.frontend.result    }}"
-          echo "║  Integration (full stack) : ${{ needs.integration.result }}"
-          echo "╚══════════════════════════════════════════════╝"
-          echo ""
-          echo "Commit : ${{ github.sha }}"
-          echo "Branch : ${{ github.ref_name }}"
-          echo "Trigger: ${{ github.event_name }}"
+          echo "=============================================="
+          echo "   Sentinel XAI - Full Stack CI Summary"
+          echo "=============================================="
+          echo "  Backend  (FastAPI + ML) : ${{ needs.backend.result }}"
+          echo "  Frontend (React + Vite) : ${{ needs.frontend.result }}"
+          echo "  Integration (full stack): ${{ needs.integration.result }}"
+          echo "=============================================="
+          echo "  Commit : ${{ github.sha }}"
+          echo "  Branch : ${{ github.ref_name }}"
+          echo "  Trigger: ${{ github.event_name }}"
+          echo "=============================================="
 
       - name: Fail if any job failed
         if: |
-          needs.backend.result     == 'failure' ||
-          needs.frontend.result    == 'failure' ||
+          needs.backend.result == 'failure' ||
+          needs.frontend.result == 'failure' ||
           needs.integration.result == 'failure'
-        run: |
-          echo "❌ One or more jobs failed — see logs above"
-          exit 1
+        run: exit 1
