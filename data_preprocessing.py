@@ -111,7 +111,9 @@ def load_and_merge_data():
     separator("STEP 1 — DATA COLLECTION & INTEGRATION (ETL)")
 
     # ── Try MySQL first; fall back to CSV if DB is unavailable (CI mode) ────
-    csv_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'students.csv')
+    # Resolve CSV path relative to this script's location
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(_script_dir, 'backend', 'data', 'students.csv')
     csv_path = os.path.normpath(csv_path)
 
     try:
@@ -200,20 +202,20 @@ def load_and_merge_data():
             'StudentID':             raw['student_id'],
             'name':                  raw['name'],
             'programme':             raw['programme'],
-            'year_of_study':         raw['year'],
-            'GPA':                   raw[['gpa_sem1','gpa_sem2','gpa_sem3']].mean(axis=1),
-            'GPAChange':             raw['gpa_sem3'] - raw['gpa_sem1'],
-            'CreditCompletion':      raw.get('assignment_submissions', pd.Series([0]*len(raw))),
+            'YearOfStudy':           raw['year'].astype(int),
+            'GPA':                   raw[['gpa_sem1','gpa_sem2','gpa_sem3']].mean(axis=1).round(2),
+            'GPAChange':             (raw['gpa_sem3'] - raw['gpa_sem1']).round(2),
+            'CreditCompletion':      raw.get('assignment_submissions', pd.Series([5.0]*len(raw))),
             'AvgAttendanceRate':     raw['attendance'],
             'AvgLoginFrequency':     raw['lms_logins'],
             'AvgLibraryVisits':      raw['library_visits'],
             'AvgLateNightSessions':  raw['after_hours_wifi'],
             'TotalSubmitted':        raw['assignment_submissions'],
             'TotalMissed':           (10 - raw['assignment_submissions'].clip(0, 10)),
-            'AvgForumActivity':      raw['lms_logins'] * 0.3,
-            'AvgSessionDuration':    raw['lms_logins'] * 5,
-            'TotalDownloads':        raw['lms_logins'] * 2,
-            'TotalQuizAttempts':     raw['assignment_submissions'] * 0.8,
+            'AvgForumActivity':      (raw['lms_logins'] * 0.3).round(2),
+            'AvgSessionDuration':    (raw['lms_logins'] * 5).round(2),
+            'TotalDownloads':        (raw['lms_logins'] * 2).round(0),
+            'TotalQuizAttempts':     (raw['assignment_submissions'] * 0.8).round(0),
             'AvgDiningSwipes':       pd.Series([3.0] * len(raw)),
             'AvgRecreationUse':      raw['facility_access'],
             'Semester':              '2024-S1',
@@ -344,9 +346,10 @@ def clean_data(df):
         print(f"        {col:<28} {count} outliers capped")
 
     # ── 2.5 Data Type Enforcement ─────────────────────────────────────────────
-    df['YearOfStudy'] = df['YearOfStudy'].astype(int)
-    df['GPA']         = df['GPA'].astype(float).round(2)
-    df['GPAChange']   = df['GPAChange'].fillna(0.0).astype(float).round(2)
+    year_col = 'YearOfStudy' if 'YearOfStudy' in df.columns else 'year_of_study'
+    df[year_col] = df[year_col].astype(int)
+    df['GPA']       = df['GPA'].astype(float).round(2)
+    df['GPAChange'] = df['GPAChange'].fillna(0.0).astype(float).round(2)
 
     assert df['GPA'].between(0.0, 4.0).all(), \
         "ERROR: GPA values detected outside valid range [0.0, 4.0]"
@@ -761,23 +764,11 @@ def save_datasets(X_train, X_val, X_test,
         pd.Series(series, name='RiskBinary').to_csv(path, index=False)
         print(f"[SAVE] {name}.csv → {path}  ({len(series)} labels)")
     
-    # ✓ NEW: Create students.csv for backend/data_service.py consumption
-    student_df = pd.DataFrame({
-        'student_id': df['StudentID'],
-        'name': df['name'],
-        'programme': df['programme'],
-        'year': df['year_of_study'],
-        'gpa_sem1': df['GPA'].shift(2).fillna(df['GPA']),  # Approximate
-        'gpa_sem2': df['GPA'].shift(1).fillna(df['GPA']),
-        'gpa_sem3': df['GPA'],
-        'attendance': df.get('AvgAttendanceRate', 75.0),
-        'lms_logins': df.get('AvgLoginFrequency', 10.0),
-        'facility_access': df.get('AvgDiningSwipes', 7.0) + df.get('AvgLibraryVisits', 2.0),
-        'risk_label': df['RiskLabel']
-    })
-    students_path = f'{DIR_DATA}/students.csv'
-    student_df.to_csv(students_path, index=False)
-    print(f"[SAVE] students.csv → {students_path}  ({len(student_df)} students)")
+    # students.csv is already written by generate_synthetic_data.py
+    # and is available at backend/data/students.csv — no need to rebuild here.
+    students_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backend', 'data', 'students.csv')
+    if os.path.exists(students_path):
+        print(f"[INFO] students.csv already exists at {students_path} — skipping rebuild")
 
 
 # =============================================================================

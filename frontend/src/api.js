@@ -535,5 +535,54 @@ export async function healthCheck() {
 // EXPORT DEFAULT API OBJECT
 // ============================================
 
-export default {\n  // Auth\n  login,\n  logout,\n  getStoredToken,\n  getStoredUser,\n  isAuthenticated,\n  \n  // Students\n  fetchStudents,\n  fetchStudent,\n  updateStudent,\n  \n  // Stats\n  fetchStats,\n  \n  // Roles\n  fetchRoles,\n  \n  // Tier\n  fetchTierConfig,\n  \n  // Audit\n  fetchAuditLogs,\n  createAuditLog,\n  \n  // Users\n  fetchUsers,\n  createUser,\n  \n  // Pipeline\n  getPipelineStatus,\n  runPipeline,\n  predictStudent,\n  batchUpdatePredictions,\n  \n  // Preprocessing\n  runPreprocessing,\n  getPreprocessingStatus,\n  getPreprocessingResults,\n  \n  // WebSocket\n  wsManager,\n  \n  // Health\n  healthCheck,\n  \n  // Base URL\n  API_BASE_URL,\n};
+export default {
+  // Auth
+  login,
+  logout,
+  getStoredToken,
+  getStoredUser,
+  isAuthenticated,
+
+  // Students
+  fetchStudents,
+  fetchStudent,
+  updateStudent,
+
+  // Stats
+  fetchStats,
+
+  // Roles
+  fetchRoles,
+
+  // Tier
+  fetchTierConfig,
+
+  // Audit
+  fetchAuditLogs,
+  createAuditLog,
+
+  // Users
+  fetchUsers,
+  createUser,
+
+  // Pipeline
+  getPipelineStatus,
+  runPipeline,
+  predictStudent,
+  batchUpdatePredictions,
+
+  // Preprocessing
+  runPreprocessing,
+  getPreprocessingStatus,
+  getPreprocessingResults,
+
+  // WebSocket
+  wsManager,
+
+  // Health
+  healthCheck,
+
+  // Base URL
+  API_BASE_URL,
+};
 
