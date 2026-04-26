@@ -70,13 +70,20 @@ jobs:
           cd backend
           uvicorn server:app --host 0.0.0.0 --port ${{ env.BACKEND_PORT }} --log-level info &
           echo "Waiting for backend to be ready..."
-          for i in $(seq 1 30); do
+          READY=0
+          for i in $(seq 1 40); do
             if curl -sf http://localhost:${{ env.BACKEND_PORT }}/health > /dev/null 2>&1; then
               echo "Backend is up after ${i}s"
+              READY=1
               break
             fi
             sleep 1
           done
+          if [ "$READY" -eq 0 ]; then
+            echo "Backend did not start within 40s — dumping logs:"
+            cat /tmp/uvicorn.log 2>/dev/null || true
+            exit 1
+          fi
         env:
           SECRET_KEY: ${{ secrets.SECRET_KEY || 'ci-dev-secret-key-sentinel-xai-2026' }}
           ENVIRONMENT: ci
@@ -85,8 +92,13 @@ jobs:
         run: |
           response=$(curl -sf http://localhost:${{ env.BACKEND_PORT }}/health)
           echo "Health: $response"
-          echo "$response" | python -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', f'unexpected: {d}'"
-          echo "/health OK"
+          echo "$response" | python -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          # server returns 'healthy' or 'ok' — accept either
+          assert d.get('status') in ('ok', 'healthy'), f'unexpected status: {d}'
+          print('/health OK —', d.get('status'))
+          "
 
       - name: API test - GET /roles
         run: |
@@ -270,9 +282,11 @@ jobs:
         run: |
           cd backend
           uvicorn server:app --host 0.0.0.0 --port ${{ env.BACKEND_PORT }} --log-level info &
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:${{ env.BACKEND_PORT }}/health && break || sleep 1
+          READY=0
+          for i in $(seq 1 40); do
+            curl -sf http://localhost:${{ env.BACKEND_PORT }}/health && READY=1 && break || sleep 1
           done
+          if [ "$READY" -eq 0 ]; then echo "Backend failed to start"; exit 1; fi
           echo "Backend ready"
         env:
           SECRET_KEY: ${{ secrets.SECRET_KEY || 'ci-integration-secret-2026' }}
