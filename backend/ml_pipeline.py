@@ -8,17 +8,45 @@ import os
 import sys
 import json
 import joblib
-import shap
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+# shap is imported lazily inside generate_shap_explanation() to avoid
+# blocking server startup (shap takes ~8s to import due to C extensions)
+shap = None
+def _get_shap():
+    global shap
+    if shap is None:
+        import shap as _shap
+        shap = _shap
+    return shap
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from xgboost import XGBClassifier, XGBRegressor
-from sklearn.ensemble import RandomForestClassifier
+# XGBoost and sklearn are imported lazily to avoid 5-8s import delay
+# that would cause uvicorn health checks to time out in CI
+_XGBClassifier = None
+_XGBRegressor = None
+
+def _get_xgb():
+    global _XGBClassifier, _XGBRegressor
+    if _XGBClassifier is None:
+        from xgboost import XGBClassifier, XGBRegressor
+        _XGBClassifier = XGBClassifier
+        _XGBRegressor = XGBRegressor
+    return _XGBClassifier, _XGBRegressor
+# sklearn imported lazily to avoid 3-4s import delay on server startup
+_RandomForestClassifier = None
+
+def _get_rf():
+    global _RandomForestClassifier
+    if _RandomForestClassifier is None:
+        from sklearn.ensemble import RandomForestClassifier
+        _RandomForestClassifier = RandomForestClassifier
+    return _RandomForestClassifier
 
 # Try to import PyCaret (optional)
 try:
@@ -278,7 +306,8 @@ class MLPipeline:
         else:
             raise ValueError("No risk_label or RiskLabel column found in data")
         
-        # Train XGBoost classifier
+        # Train XGBoost classifier (lazy import to avoid 5-8s startup delay)
+        XGBClassifier, _ = _get_xgb()
         self.model = XGBClassifier(
             n_estimators=100,
             max_depth=5,
@@ -304,7 +333,7 @@ class MLPipeline:
             self.save_model()
         
         # SHAP analysis
-        explainer = shap.TreeExplainer(self.model)
+        explainer = _get_shap().TreeExplainer(self.model)
         shap_values = explainer.shap_values(X)
         
         # Get feature importance
@@ -474,7 +503,7 @@ class MLPipeline:
             return []
         
         # Get TreeExplainer
-        explainer = shap.TreeExplainer(self.model)
+        explainer = _get_shap().TreeExplainer(self.model)
         shap_values = explainer.shap_values(X)
         
         # Get feature values for this student

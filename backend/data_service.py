@@ -27,7 +27,7 @@ class DataService:
     # DATA LOADING
     # =========================================================================
     
-def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
+    def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
         """
         ✓ FIX 4.1: Multi-path search + sample fallback if no CSV
         """
@@ -36,7 +36,8 @@ def load_students_from_csv(self, file_path: str = None) -> List[Dict]:
             possible_paths = [
                 os.path.join(os.path.dirname(__file__), "..", "data", "processed", "students.csv"),
                 os.path.join(os.path.dirname(__file__), "..", "backend", "data", "students.csv"),
-                os.path.join(os.path.dirname(__file__), "..", "data", "students.csv"),
+                os.path.join(os.path.dirname(__file__), "data", "students.csv"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "students.csv"),
                 "data/processed/students.csv",
             ]
             
