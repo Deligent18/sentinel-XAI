@@ -266,8 +266,11 @@ class Login(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
-    user: Optional[Dict] = None
-    
+    name: Optional[str] = None
+    role: Optional[str] = None
+    roleLabel: Optional[str] = None
+    username: Optional[str] = None
+
     class Config:
         extra = "allow"
 
@@ -383,14 +386,12 @@ async def login(form_data: Login):
     
     access_token = create_access_token(data={"sub": user["username"], "role": user["role"]})
     return {
-        "access_token": access_token, 
+        "access_token": access_token,
         "token_type": "bearer",
-        "user": {
-            "username": user["username"],
-            "name": user["name"],
-            "role": user["role"],
-            "roleLabel": user.get("roleLabel", user["role"])
-        }
+        "name": user.get("name", user["username"]),
+        "role": user["role"],
+        "roleLabel": user.get("roleLabel", user["role"].title()),
+        "username": user["username"],
     }
 
 @app.get("/students")
