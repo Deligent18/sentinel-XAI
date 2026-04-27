@@ -1,0 +1,81 @@
+version: "3.9"
+
+# ============================================================================
+# Sentinel XAI — Docker Compose
+# One command to start everything: docker compose up
+# ============================================================================
+
+services:
+
+  # ── Main app (frontend + backend in one container) ─────────────────────────
+  sentinel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # URL the browser uses to reach the API
+        # Change to your server IP/domain in production
+        VITE_API_URL: http://localhost/api
+    image: sentinel-xai:latest
+    container_name: sentinel-xai
+    restart: unless-stopped
+
+    ports:
+      - "80:80"        # Frontend (nginx)
+      - "8000:8000"    # FastAPI direct access (optional)
+
+    environment:
+      # REQUIRED: Change this to a strong random string in production
+      # Generate one with: python -c "import secrets; print(secrets.token_hex(32))"
+      SECRET_KEY: ${SECRET_KEY:-xai-sentinel-change-me-in-production}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+
+      # Dataset settings
+      NUM_STUDENTS: ${NUM_STUDENTS:-1200}
+      DATA_SEED: ${DATA_SEED:-42}
+
+    volumes:
+      # Persist trained models between restarts
+      - sentinel_models:/app/models
+      # Persist generated data between restarts
+      - sentinel_data:/app/backend/data
+      - sentinel_data:/app/data
+      # Persist reports
+      - sentinel_reports:/app/reports
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+  # ── MySQL (optional — comment out if using CSV mode only) ──────────────────
+  # Uncomment this block and set DB_* env vars in backend/server.py to use
+  # a real database instead of CSV synthetic data.
+  #
+  # db:
+  #   image: mysql:8.0
+  #   container_name: sentinel-db
+  #   restart: unless-stopped
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-sentinel_root}
+  #     MYSQL_DATABASE: sentinel_xai
+  #     MYSQL_USER: ${DB_USER:-sentinel}
+  #     MYSQL_PASSWORD: ${DB_PASSWORD:-sentinel_pass}
+  #   volumes:
+  #     - sentinel_db:/var/lib/mysql
+  #     - ./xai_student_risk_schema.sql:/docker-entrypoint-initdb.d/schema.sql
+  #   ports:
+  #     - "3306:3306"
+  #   healthcheck:
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+volumes:
+  sentinel_models:
+  sentinel_data:
+  sentinel_reports:
+  # sentinel_db:    # uncomment if using MySQL
