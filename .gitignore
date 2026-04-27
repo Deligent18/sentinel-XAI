@@ -35,6 +35,12 @@ yarn-error.log
 
 # Data files (large)
 *.csv
+# But allow the real source datasets in data/raw/
+!data/raw/uci_student_performance_math.csv
+!data/raw/uci_student_performance_portuguese.csv
+!data/raw/uci_higher_education_raw.csv
+!data/raw/uci_higher_education.csv
+!data/raw/uci_student_performance_description.txt
 *.pkl
 *.joblib
 
