@@ -292,7 +292,7 @@ class MLPipeline:
         df = self.engineer_features(df)
         X = self.prepare_features(df)
         
-# Prepare target variable
+        # Prepare target variable
         # ✓ FIX 2.1: Single source of truth + PascalCase (from preprocessing)
         RISK_LABEL_MAPPING = {
             'High': 2, 'Medium': 1, 'Low': 0
@@ -315,7 +315,6 @@ class MLPipeline:
             subsample=0.8,
             colsample_bytree=0.8,
             random_state=42,
-            use_label_encoder=False,
             eval_metric='mlogloss'
         )
         
@@ -332,14 +331,36 @@ class MLPipeline:
         if save:
             self.save_model()
         
-        # SHAP analysis
-        explainer = _get_shap().TreeExplainer(self.model)
-        shap_values = explainer.shap_values(X)
-        
-        # Get feature importance
+        # SHAP analysis for feature importance
+        try:
+            explainer  = _get_shap().TreeExplainer(self.model)
+            shap_vals  = explainer.shap_values(X)
+
+            # XGBoost multi-class returns ndarray shape (n_samples, n_features, n_classes)
+            # or a list of (n_samples, n_features) arrays — handle both
+            sv = np.array(shap_vals)
+            if sv.ndim == 3:
+                # (n_samples, n_features, n_classes) → mean abs across samples and classes
+                importance_arr = np.abs(sv).mean(axis=(0, 2))
+            elif sv.ndim == 2:
+                # (n_samples, n_features)
+                importance_arr = np.abs(sv).mean(axis=0)
+            elif isinstance(shap_vals, list):
+                importance_arr = np.mean([np.abs(s).mean(axis=0) for s in shap_vals], axis=0)
+            else:
+                importance_arr = self.model.feature_importances_
+
+            importance_arr = np.array(importance_arr).flatten()
+            # Align length with feature_names
+            n = min(len(self.feature_names), len(importance_arr))
+        except Exception as shap_err:
+            print(f"[SHAP] Skipping SHAP in train_model: {shap_err}")
+            importance_arr = self.model.feature_importances_.flatten()
+            n = min(len(self.feature_names), len(importance_arr))
+
         importance_df = pd.DataFrame({
-            'feature': self.feature_names,
-            'importance': np.abs(shap_values).mean(axis=0)
+            'feature':    self.feature_names[:n],
+            'importance': importance_arr[:n],
         }).sort_values('importance', ascending=False)
         
         results = {
@@ -452,91 +473,91 @@ class MLPipeline:
     
     def predict_single(self, student_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Predict risk for a single student
-        
-        Args:
-            student_data: Dictionary with student features
-            
-        Returns:
-            Dictionary with risk score, tier, and SHAP explanations
+        Predict risk for a single student with SHAP explanations.
         """
         if not self.is_trained:
             if not self.load_model():
                 raise ValueError("Model not trained")
-        
-        # Convert to DataFrame
+
+        # Convert to DataFrame and engineer features — same path as batch predict
         df = pd.DataFrame([student_data])
-        
-        # Get prediction
-        predictions = self.predict(df)
-        
-        risk_score = predictions['risk'].iloc[0]
-        tier = predictions['tier'].iloc[0]
-        
-        # Generate SHAP explanations
-        shap_explanation = self.generate_shap_explanation(df.iloc[0:1], student_data)
-        
-        # Generate intervention recommendations
-        intervention = self.generate_intervention(tier, shap_explanation)
-        
-        # Generate explanation text
-        explanation = self.generate_explanation_text(student_data, shap_explanation, tier)
-        
+        df = self.engineer_features(df)
+        X  = self.prepare_features(df)   # numeric feature matrix only
+
+        # Predict
+        predictions  = self.model.predict(X)
+        probabilities = self.model.predict_proba(X)
+
+        reverse_risk_mapping = {0: 'low', 1: 'medium', 2: 'high'}
+        risk_score = float(probabilities[0, 2] + 0.5 * probabilities[0, 1])
+        risk_score = float(np.clip(risk_score, 0, 1))
+        tier = 'high' if risk_score >= 0.7 else 'medium' if risk_score >= 0.4 else 'low'
+
+        # Generate SHAP on the correct feature matrix X
+        shap_explanation = self.generate_shap_explanation(X, student_data)
+        intervention     = self.generate_intervention(tier, shap_explanation)
+        explanation      = self.generate_explanation_text(student_data, shap_explanation, tier)
+
         return {
-            "risk": float(risk_score),
-            "tier": tier,
-            "shap": shap_explanation,
+            "risk":        risk_score,
+            "tier":        tier,
+            "shap":        shap_explanation,
             "explanation": explanation,
-            "intervention": intervention,
-            "lastUpdated": datetime.now().strftime("%Y-%m-%d")
+            "intervention":intervention,
+            "lastUpdated": datetime.now().strftime("%Y-%m-%d"),
         }
-    
+
     # =========================================================================
     # SHAP EXPLANATIONS
     # =========================================================================
-    
+
     def generate_shap_explanation(self, X: pd.DataFrame, original_data: Dict = None) -> List[Dict]:
-        """
-        ✓ FIX 5.1: Generate SHAP with normalized 'importance' for frontend + feature validation
-        """
-        if not self.is_trained:
+        """Generate SHAP explanations. Handles XGBoost multi-class output shapes."""
+        if not self.is_trained or len(X) == 0:
             return []
-        
-        # Get TreeExplainer
-        explainer = _get_shap().TreeExplainer(self.model)
-        shap_values = explainer.shap_values(X)
-        
-        # Get feature values for this student
-        feature_values = X.iloc[0].to_dict() if len(X) > 0 else {}
-        
-        explanations = []
-        
-        # Get absolute maximum for normalization ✓ FIX 5.1
-        if len(self.feature_names) > 0 and len(shap_values) > 0 and len(shap_values[0]) > 0:
-            max_shap = max([abs(shap_values[0][i]) for i in range(len(self.feature_names))] or [1])
-        else:
-            max_shap = 1.0
-        
-        for i, feature in enumerate(self.feature_names):
-            if i < len(shap_values) and i < len(shap_values[0]):
-                raw_value = shap_values[0][i]
-                
-                # Create human-readable feature name
-                feature_label = self._format_feature_name(feature, original_data)
-                
+        try:
+            explainer = _get_shap().TreeExplainer(self.model)
+            shap_vals = explainer.shap_values(X)
+            sv_arr    = np.array(shap_vals)
+
+            # XGBoost multi-class: (n_samples, n_features, n_classes)
+            if sv_arr.ndim == 3:
+                proba      = self.model.predict_proba(X)[0]
+                pred_class = int(np.argmax(proba))
+                sv = sv_arr[0, :, pred_class]       # (n_features,)
+            elif isinstance(shap_vals, list):
+                proba      = self.model.predict_proba(X)[0]
+                pred_class = int(np.argmax(proba))
+                sv = np.array(shap_vals[pred_class])[0]
+            elif sv_arr.ndim == 2:
+                sv = sv_arr[0]                      # (n_features,)
+            else:
+                sv = sv_arr.flatten()
+
+            feature_names  = list(X.columns)
+            feature_values = X.iloc[0].to_dict()
+            max_abs        = max(float(np.abs(sv).max()), 1e-9)
+
+            explanations = []
+            for i, feature in enumerate(feature_names):
+                if i >= len(sv):
+                    break
+                raw = float(sv[i])
                 explanations.append({
-                    "feature": feature_label,
-                    "value": float(raw_value),           # Raw SHAP value (can be negative)
-                    "importance": float(abs(raw_value) / max_shap),  # Normalized 0-1 for UI ✓ FIX 5.1
-                    "dir": 1 if raw_value > 0 else -1,
-                    "feature_value": float(feature_values.get(feature, 0))
+                    "feature":       self._format_feature_name(feature, original_data),
+                    "value":         raw,
+                    "importance":    float(abs(raw) / max_abs),
+                    "dir":           1 if raw > 0 else -1,
+                    "feature_value": float(feature_values.get(feature, 0)),
                 })
-        
-        # Sort by absolute value
-        explanations.sort(key=lambda x: abs(x['value']), reverse=True)
-        
-        return explanations[:6]
-    
+
+            explanations.sort(key=lambda x: abs(x["value"]), reverse=True)
+            return explanations[:6]
+
+        except Exception as e:
+            print(f"[SHAP] Error: {e}")
+            return []
+
     def _format_feature_name(self, feature: str, data: Dict = None) -> str:
         """Convert technical feature names to human-readable labels"""
         feature_labels = {
@@ -649,7 +670,7 @@ class MLPipeline:
                 'last_trained': self.last_trained,
                 'is_trained': self.is_trained
             }
-            metadata_path = path.replace('.joblib', '_metadata.json')
+            metadata_path = path.replace('.pkl', '_metadata.json').replace('.joblib', '_metadata.json')
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f)
                 
@@ -659,64 +680,61 @@ class MLPipeline:
             return False
     
     def load_model(self, path: Optional[str] = None) -> bool:
-        """Load trained model from disk"""
+        """Load trained model from disk — tries active_model.pkl first,
+        then falls back to xgboost_model.pkl saved by model_training.py"""
         if path is None:
             path = ACTIVE_MODEL_PATH
-            
+
         try:
             self.model = joblib.load(path)
-            
+
             # Load metadata
-            metadata_path = path.replace('.joblib', '_metadata.json')
+            metadata_path = path.replace('.pkl', '_metadata.json').replace('.joblib', '_metadata.json')
             if os.path.exists(metadata_path):
                 with open(metadata_path, 'r') as f:
                     metadata = json.load(f)
                     self.feature_names = metadata.get('feature_names', [])
-                    self.last_trained = metadata.get('last_trained')
-                    self.is_trained = metadata.get('is_trained', True)
-                    
+                    self.last_trained  = metadata.get('last_trained')
+                    self.is_trained    = metadata.get('is_trained', True)
+            else:
+                self.is_trained = True
+
             print(f"Model loaded from {path}")
             return True
+
+        except FileNotFoundError:
+            # active_model.pkl not found — fall back to pre-trained models
+            print(f"active_model.pkl not found, trying pretrained models...")
+            return self.load_pretrained_models()
+
         except Exception as e:
             print(f"Error loading model: {e}")
-            return False
+            return self.load_pretrained_models()
     
     def load_pretrained_models(self) -> bool:
-        """
-        Load pre-trained XGBoost and Random Forest models
-        Returns True if models loaded successfully
-        """
+        """Load pre-trained XGBoost model. Returns False if not found."""
         try:
-            # Load XGBoost model
-            if os.path.exists(XGBOOST_MODEL_PATH):
-                self.xgboost_model = joblib.load(XGBOOST_MODEL_PATH)
-                print(f"✓ XGBoost model loaded from {XGBOOST_MODEL_PATH}")
-            else:
-                print(f"Warning: XGBoost model not found at {XGBOOST_MODEL_PATH}")
-                self.xgboost_model = None
-            
-            # Load Random Forest model
+            from ml_pipeline import XGBOOST_MODEL_PATH, RF_MODEL_PATH, FEATURE_NAMES_PATH
+            if not os.path.exists(XGBOOST_MODEL_PATH):
+                print(f"[INFO] No pretrained XGBoost model at {XGBOOST_MODEL_PATH}")
+                return False
+
+            self.xgboost_model = joblib.load(XGBOOST_MODEL_PATH)
+            print(f"✓ XGBoost model loaded from {XGBOOST_MODEL_PATH}")
+
             if os.path.exists(RF_MODEL_PATH):
                 self.rf_model = joblib.load(RF_MODEL_PATH)
-                print(f"✓ Random Forest model loaded from {RF_MODEL_PATH}")
-            else:
-                print(f"Warning: Random Forest model not found at {RF_MODEL_PATH}")
-                self.rf_model = None
-            
-            # Load feature names
+
             if os.path.exists(FEATURE_NAMES_PATH):
                 self.feature_names = joblib.load(FEATURE_NAMES_PATH)
                 print(f"✓ Feature names loaded: {len(self.feature_names)} features")
-            
-            # Set active model to XGBoost by default (typically performs better)
+
             if self.xgboost_model is not None:
                 self.model = self.xgboost_model
                 self.is_trained = True
-                self.last_trained = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 return True
-            
-            return self.xgboost_model is not None
-            
+
+            return False
         except Exception as e:
             print(f"Error loading pre-trained models: {e}")
             return False

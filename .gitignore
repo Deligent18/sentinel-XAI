@@ -48,3 +48,7 @@ yarn-error.log
 .DS_Store
 Thumbs.db
 
+
+# Allow the active trained model
+!models/active_model.pkl
+!models/active_model_metadata.json

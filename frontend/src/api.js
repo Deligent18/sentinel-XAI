@@ -3,118 +3,96 @@
  * Handles all backend communication including authentication, data fetching, and WebSocket
  */
 
-// API Base URL - configure based on environment
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
-// Token storage key
 const TOKEN_KEY = 'xai_token';
-const USER_KEY = 'xai_user';
+const USER_KEY  = 'xai_user';
 
-// ============================================
-// AUTHENTICATION
-// ============================================
-
-export async function login(username, password, role) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ username, password, role }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Login failed');
-    }
-
-    const data = await response.json();
-    
-    // Store token and user info
-    localStorage.setItem(TOKEN_KEY, data.access_token);
-    localStorage.setItem(USER_KEY, JSON.stringify({ username, role }));
-    
-    return {
-      success: true,
-      token: data.access_token,
-      username,
-      role,
-    };
-  } catch (error) {
-    console.error('Login error:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
-}
-
-export function logout() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-}
+// ── Auth helpers ──────────────────────────────────────────────────────────────
 
 export function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 
 export function getStoredUser() {
-  const user = localStorage.getItem(USER_KEY);
-  return user ? JSON.parse(user) : null;
+  try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch { return null; }
 }
 
 export function isAuthenticated() {
   return !!getStoredToken();
 }
 
-// ============================================
-// AUTHENTICATED FETCH
-// ============================================
+export function logout() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {}
+}
+
+// ── Core fetch wrapper ────────────────────────────────────────────────────────
 
 async function authenticatedFetch(url, options = {}) {
   const token = getStoredToken();
-  
   const headers = {
     'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
-  
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
-  
+
+  const response = await fetch(url, { ...options, headers });
+
   if (response.status === 401) {
-    // Token expired or invalid
     logout();
-    window.location.reload();
     throw new Error('Session expired');
   }
-  
+
   return response;
 }
 
-// ============================================
-// STUDENTS API
-// ============================================
+// ── Authentication ────────────────────────────────────────────────────────────
+
+export async function login(username, password, role) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      return { success: false, error: err.detail || `Login failed (${response.status})` };
+    }
+
+    const data = await response.json();
+
+    try {
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      localStorage.setItem(USER_KEY, JSON.stringify({ username, role }));
+    } catch {}
+
+    return {
+      success: true,
+      token: data.access_token,
+      name: data.name || username,
+      role: data.role || role,
+      roleLabel: data.roleLabel || role,
+      username: data.username || username,
+      data,
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// ── Students ──────────────────────────────────────────────────────────────────
 
 export async function fetchStudents() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/students`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch students');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch students');
     const students = await response.json();
     return { success: true, students };
   } catch (error) {
-    console.error('Error fetching students:', error);
     return { success: false, error: error.message };
   }
 }
@@ -122,15 +100,10 @@ export async function fetchStudents() {
 export async function fetchStudent(studentId) {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/students/${studentId}`);
-    
-    if (!response.ok) {
-      throw new Error('Student not found');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch student');
     const student = await response.json();
     return { success: true, student };
   } catch (error) {
-    console.error('Error fetching student:', error);
     return { success: false, error: error.message };
   }
 }
@@ -141,152 +114,117 @@ export async function updateStudent(studentId, updates) {
       method: 'POST',
       body: JSON.stringify(updates),
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to update student');
-    }
-    
+    if (!response.ok) throw new Error('Failed to update student');
     const student = await response.json();
     return { success: true, student };
   } catch (error) {
-    console.error('Error updating student:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================
-// STATS API
-// ============================================
+// ── Stats ─────────────────────────────────────────────────────────────────────
 
 export async function fetchStats() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/stats`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch stats');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch stats');
     const stats = await response.json();
     return { success: true, stats };
   } catch (error) {
-    console.error('Error fetching stats:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================
-// ROLES API
-// ============================================
+// ── Roles & Tier ──────────────────────────────────────────────────────────────
 
 export async function fetchRoles() {
   try {
     const response = await fetch(`${API_BASE_URL}/roles`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch roles');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch roles');
     const roles = await response.json();
     return { success: true, roles };
   } catch (error) {
-    console.error('Error fetching roles:', error);
     return { success: false, error: error.message };
   }
 }
-
-// ============================================
-// TIER CONFIG API
-// ============================================
 
 export async function fetchTierConfig() {
   try {
-    const response = await fetch(`${API_BASE_URL}/tier`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch tier config');
-    }
-    
+    const response = await authenticatedFetch(`${API_BASE_URL}/tier`);
+    if (!response.ok) throw new Error('Failed to fetch tier config');
     const tier = await response.json();
     return { success: true, tier };
   } catch (error) {
-    console.error('Error fetching tier config:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================
-// AUDIT LOGS API
-// ============================================
+// ── Audit logs ────────────────────────────────────────────────────────────────
 
 export async function fetchAuditLogs() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/audit-logs`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch audit logs');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch audit logs');
     const logs = await response.json();
     return { success: true, logs };
   } catch (error) {
-    console.error('Error fetching audit logs:', error);
     return { success: false, error: error.message };
   }
 }
 
-export async function createAuditLog(action, target, level) {
+export async function createAuditLog(logData) {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/audit-logs`, {
       method: 'POST',
-      body: JSON.stringify({ action, target, level }),
+      body: JSON.stringify(logData),
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to create audit log');
-    }
-    
+    if (!response.ok) throw new Error('Failed to create audit log');
     const log = await response.json();
     return { success: true, log };
   } catch (error) {
-    console.error('Error creating audit log:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================\n// USERS API\n// ============================================\n\nexport async function createUser(userData) {\n  try {\n    const response = await authenticatedFetch(`${API_BASE_URL}/users`, {\n      method: 'POST',\n      body: JSON.stringify(userData),\n    });\n    \n    if (!response.ok) {\n      throw new Error('Failed to create user');\n    }\n    \n    const result = await response.json();\n    return { success: true, result };\n  } catch (error) {\n    console.error('Error creating user:', error);\n    return { success: false, error: error.message };\n  }\n}
+// ── Users ─────────────────────────────────────────────────────────────────────
 
 export async function fetchUsers() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/users`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch users');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch users');
     const users = await response.json();
     return { success: true, users };
   } catch (error) {
-    console.error('Error fetching users:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================
-// PIPELINE API
-// ============================================
+export async function createUser(userData) {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/users`, {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create user');
+    }
+    const result = await response.json();
+    return { success: true, result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// ── Pipeline ──────────────────────────────────────────────────────────────────
 
 export async function getPipelineStatus() {
   try {
-    const response = await fetch(`${API_BASE_URL}/pipeline/status`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to get pipeline status');
-    }
-    
+    const response = await authenticatedFetch(`${API_BASE_URL}/pipeline/status`);
+    if (!response.ok) throw new Error('Failed to get pipeline status');
     const status = await response.json();
     return { success: true, status };
   } catch (error) {
-    console.error('Error getting pipeline status:', error);
     return { success: false, error: error.message };
   }
 }
@@ -296,33 +234,24 @@ export async function runPipeline() {
     const response = await authenticatedFetch(`${API_BASE_URL}/pipeline/run`, {
       method: 'POST',
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to run pipeline');
-    }
-    
+    if (!response.ok) throw new Error('Failed to run pipeline');
     const result = await response.json();
     return { success: true, result };
   } catch (error) {
-    console.error('Error running pipeline:', error);
     return { success: false, error: error.message };
   }
 }
 
 export async function predictStudent(studentId) {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/pipeline/predict/${studentId}`, {
-      method: 'POST',
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to predict student');
-    }
-    
+    const response = await authenticatedFetch(
+      `${API_BASE_URL}/pipeline/predict/${studentId}`,
+      { method: 'POST' }
+    );
+    if (!response.ok) throw new Error('Failed to predict student');
     const result = await response.json();
     return { success: true, result };
   } catch (error) {
-    console.error('Error predicting student:', error);
     return { success: false, error: error.message };
   }
 }
@@ -332,165 +261,36 @@ export async function batchUpdatePredictions() {
     const response = await authenticatedFetch(`${API_BASE_URL}/students/batch`, {
       method: 'POST',
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to batch update predictions');
-    }
-    
+    if (!response.ok) throw new Error('Failed to batch update predictions');
     const result = await response.json();
     return { success: true, result };
   } catch (error) {
-    console.error('Error batch updating predictions:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================
-// WEBSOCKET CONNECTION
-// ============================================
-
-class WebSocketManager {
-  constructor() {
-    this.ws = null;
-    this.listeners = new Map();
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 3000;
-  }
-
-  connect() {
-    const token = getStoredToken();
-    const wsUrl = `${API_BASE_URL.replace('http', 'ws')}/ws`;
-    
-    try {
-      this.ws = new WebSocket(wsUrl);
-      
-      this.ws.onopen = () => {
-        console.log('WebSocket connected');
-        this.reconnectAttempts = 0;
-        
-        // Authenticate after connection
-        if (token) {
-          this.ws.send(JSON.stringify({ type: 'auth', token }));
-        }
-      };
-      
-      this.ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          this.notifyListeners(message);
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      };
-      
-      this.ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        this.attemptReconnect();
-      };
-      
-      this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-      };
-      
-    } catch (error) {
-      console.error('Error creating WebSocket:', error);
-      this.attemptReconnect();
-    }
-  }
-
-  attemptReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      setTimeout(() => this.connect(), this.reconnectDelay);
-    } else {
-      console.log('Max reconnection attempts reached');
-    }
-  }
-
-  disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-
-  on(event, callback) {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, []);
-    }
-    this.listeners.get(event).push(callback);
-  }
-
-  off(event, callback) {
-    if (this.listeners.has(event)) {
-      const callbacks = this.listeners.get(event);
-      const index = callbacks.indexOf(callback);
-      if (index > -1) {
-        callbacks.splice(index, 1);
-      }
-    }
-  }
-
-  notifyListeners(message) {
-    const event = message.type;
-    const data = message.data;
-    
-    if (this.listeners.has(event)) {
-      this.listeners.get(event).forEach(callback => callback(data));
-    }
-    
-    // Also notify 'any' listeners
-    if (this.listeners.has('any')) {
-      this.listeners.get('any').forEach(callback => callback(message));
-    }
-  }
-
-  send(message) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    }
-  }
-}
-
-// Singleton WebSocket manager
-export const wsManager = new WebSocketManager();
-
-// ============================================
-// PREPROCESSING API
-// ============================================
+// ── Preprocessing ─────────────────────────────────────────────────────────────
 
 export async function runPreprocessing() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/preprocessing/run`, {
       method: 'POST',
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to start preprocessing');
-    }
-    
+    if (!response.ok) throw new Error('Failed to run preprocessing');
     const result = await response.json();
     return { success: true, result };
   } catch (error) {
-    console.error('Error running preprocessing:', error);
     return { success: false, error: error.message };
   }
 }
 
 export async function getPreprocessingStatus() {
   try {
-    const response = await fetch(`${API_BASE_URL}/preprocessing/status`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to get preprocessing status');
-    }
-    
+    const response = await authenticatedFetch(`${API_BASE_URL}/preprocessing/status`);
+    if (!response.ok) throw new Error('Failed to get preprocessing status');
     const status = await response.json();
     return { success: true, status };
   } catch (error) {
-    console.error('Error getting preprocessing status:', error);
     return { success: false, error: error.message };
   }
 }
@@ -498,91 +298,130 @@ export async function getPreprocessingStatus() {
 export async function getPreprocessingResults() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/preprocessing/results`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to get preprocessing results');
-    }
-    
+    if (!response.ok) throw new Error('Failed to get preprocessing results');
     const results = await response.json();
     return { success: true, results };
   } catch (error) {
-    console.error('Error getting preprocessing results:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================
-// HEALTH CHECK
-// ============================================
+// ── Health ────────────────────────────────────────────────────────────────────
 
 export async function healthCheck() {
   try {
     const response = await fetch(`${API_BASE_URL}/health`);
-    
-    if (!response.ok) {
-      throw new Error('Health check failed');
-    }
-    
-    const health = await response.json();
-    return { success: true, health };
+    if (!response.ok) throw new Error('Backend unhealthy');
+    const data = await response.json();
+    return { success: true, data };
   } catch (error) {
-    console.error('Health check error:', error);
     return { success: false, error: error.message };
   }
 }
 
-// ============================================
-// EXPORT DEFAULT API OBJECT
-// ============================================
+// ── WebSocket Manager ─────────────────────────────────────────────────────────
+
+class WebSocketManager {
+  constructor() {
+    this.ws = null;
+    this.listeners = {};
+    this.reconnectTimer = null;
+    this.shouldReconnect = false;
+  }
+
+  connect() {
+    const wsUrl = API_BASE_URL.replace(/^http/, 'ws') + '/ws';
+    this.shouldReconnect = true;
+
+    try {
+      this.ws = new WebSocket(wsUrl);
+
+      this.ws.onopen = () => {
+        console.log('[WS] Connected');
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const { type, data } = message;
+          if (type && this.listeners[type]) {
+            this.listeners[type].forEach(cb => cb(data));
+          }
+        } catch {}
+      };
+
+      this.ws.onclose = () => {
+        if (this.shouldReconnect) {
+          this.reconnectTimer = setTimeout(() => this.connect(), 3000);
+        }
+      };
+
+      this.ws.onerror = () => {};
+    } catch {}
+  }
+
+  on(event, callback) {
+    if (!this.listeners[event]) this.listeners[event] = [];
+    this.listeners[event].push(callback);
+  }
+
+  off(event, callback) {
+    if (this.listeners[event]) {
+      this.listeners[event] = this.listeners[event].filter(cb => cb !== callback);
+    }
+  }
+
+  disconnect() {
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  send(data) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
+    }
+  }
+}
+
+export const wsManager = new WebSocketManager();
+
+// ── Default export ────────────────────────────────────────────────────────────
 
 export default {
-  // Auth
   login,
   logout,
   getStoredToken,
   getStoredUser,
   isAuthenticated,
-
-  // Students
   fetchStudents,
   fetchStudent,
   updateStudent,
-
-  // Stats
   fetchStats,
-
-  // Roles
   fetchRoles,
-
-  // Tier
   fetchTierConfig,
-
-  // Audit
   fetchAuditLogs,
   createAuditLog,
-
-  // Users
   fetchUsers,
   createUser,
-
-  // Pipeline
   getPipelineStatus,
   runPipeline,
   predictStudent,
   batchUpdatePredictions,
-
-  // Preprocessing
   runPreprocessing,
   getPreprocessingStatus,
   getPreprocessingResults,
-
-  // WebSocket
-  wsManager,
-
-  // Health
   healthCheck,
-
-  // Base URL
+  wsManager,
   API_BASE_URL,
 };
-
