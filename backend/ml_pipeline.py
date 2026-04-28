@@ -292,7 +292,7 @@ class MLPipeline:
         df = self.engineer_features(df)
         X = self.prepare_features(df)
         
-# Prepare target variable
+        # Prepare target variable
         # ✓ FIX 2.1: Single source of truth + PascalCase (from preprocessing)
         RISK_LABEL_MAPPING = {
             'High': 2, 'Medium': 1, 'Low': 0
@@ -336,10 +336,18 @@ class MLPipeline:
         explainer = _get_shap().TreeExplainer(self.model)
         shap_values = explainer.shap_values(X)
         
+        # For multi-class XGBoost, shap_values is a list of arrays (one per class),
+        # each shaped (n_samples, n_features). Stack and take mean absolute across classes.
+        if isinstance(shap_values, list):
+            shap_array = np.stack(shap_values, axis=0)          # (n_classes, n_samples, n_features)
+            mean_abs_shap = np.abs(shap_array).mean(axis=(0, 1))  # (n_features,)
+        else:
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
         # Get feature importance
         importance_df = pd.DataFrame({
             'feature': self.feature_names,
-            'importance': np.abs(shap_values).mean(axis=0)
+            'importance': mean_abs_shap
         }).sort_values('importance', ascending=False)
         
         results = {
@@ -374,7 +382,7 @@ class MLPipeline:
         df = self.engineer_features(df)
         X = self.prepare_features(df)
         
-# ✓ FIX 2.1: Use same RISK_LABEL_MAPPING (PyCaret)
+        # ✓ FIX 2.1: Use same RISK_LABEL_MAPPING (PyCaret)
         RISK_LABEL_MAPPING = {
             'High': 2, 'Medium': 1, 'Low': 0
         }
@@ -467,14 +475,22 @@ class MLPipeline:
         # Convert to DataFrame
         df = pd.DataFrame([student_data])
         
-        # Get prediction
-        predictions = self.predict(df)
+        # Engineer features and build the numeric feature matrix
+        df_engineered = self.engineer_features(df.copy())
+        X = self.prepare_features(df_engineered)
+
+        # Get raw model outputs directly (avoids passing raw df through self.predict)
+        predictions_raw = self.model.predict(X)
+        probabilities = self.model.predict_proba(X)
+
+        reverse_risk_mapping = {0: 'low', 1: 'medium', 2: 'high'}
+        risk_scores = probabilities[:, 2] + 0.5 * probabilities[:, 1]
+        risk_scores = np.clip(risk_scores, 0, 1)
+        risk_score = float(risk_scores[0])
+        tier = 'high' if risk_score >= 0.7 else 'medium' if risk_score >= 0.4 else 'low'
         
-        risk_score = predictions['risk'].iloc[0]
-        tier = predictions['tier'].iloc[0]
-        
-        # Generate SHAP explanations
-        shap_explanation = self.generate_shap_explanation(df.iloc[0:1], student_data)
+        # Generate SHAP explanations — pass the ENGINEERED feature matrix X, not raw df
+        shap_explanation = self.generate_shap_explanation(X, student_data)
         
         # Generate intervention recommendations
         intervention = self.generate_intervention(tier, shap_explanation)
@@ -483,7 +499,7 @@ class MLPipeline:
         explanation = self.generate_explanation_text(student_data, shap_explanation, tier)
         
         return {
-            "risk": float(risk_score),
+            "risk": risk_score,
             "tier": tier,
             "shap": shap_explanation,
             "explanation": explanation,
@@ -502,40 +518,57 @@ class MLPipeline:
         if not self.is_trained:
             return []
         
-        # Get TreeExplainer
-        explainer = _get_shap().TreeExplainer(self.model)
-        shap_values = explainer.shap_values(X)
-        
-        # Get feature values for this student
-        feature_values = X.iloc[0].to_dict() if len(X) > 0 else {}
-        
-        explanations = []
-        
-        # Get absolute maximum for normalization ✓ FIX 5.1
-        if len(self.feature_names) > 0 and len(shap_values) > 0 and len(shap_values[0]) > 0:
-            max_shap = max([abs(shap_values[0][i]) for i in range(len(self.feature_names))] or [1])
-        else:
-            max_shap = 1.0
-        
-        for i, feature in enumerate(self.feature_names):
-            if i < len(shap_values) and i < len(shap_values[0]):
-                raw_value = shap_values[0][i]
+        try:
+            # Get TreeExplainer
+            explainer = _get_shap().TreeExplainer(self.model)
+            shap_values = explainer.shap_values(X)
+            
+            # For multi-class XGBoost, shap_values is a list of arrays:
+            # shape -> (n_classes,) where each element is (n_samples, n_features)
+            # For a single sample: shap_values[class_idx][0] gives (n_features,)
+            # We use class 2 (high risk) as the primary direction of interest.
+            if isinstance(shap_values, list):
+                # Multi-class: pick high-risk class (index 2), first (only) sample
+                sv = shap_values[2][0] if len(shap_values) > 2 else shap_values[0][0]
+            else:
+                # Binary/regression: shape is (n_samples, n_features)
+                sv = shap_values[0]
+
+            # Get feature values for this student
+            feature_values = X.iloc[0].to_dict() if len(X) > 0 else {}
+            
+            explanations = []
+            
+            if len(self.feature_names) == 0 or len(sv) == 0:
+                return []
+
+            # Normalize by max absolute SHAP value ✓ FIX 5.1
+            max_shap = max(abs(float(sv[i])) for i in range(len(sv))) or 1.0
+            
+            for i, feature in enumerate(self.feature_names):
+                if i >= len(sv):
+                    break
+                raw_value = float(sv[i])
                 
                 # Create human-readable feature name
                 feature_label = self._format_feature_name(feature, original_data)
                 
                 explanations.append({
                     "feature": feature_label,
-                    "value": float(raw_value),           # Raw SHAP value (can be negative)
-                    "importance": float(abs(raw_value) / max_shap),  # Normalized 0-1 for UI ✓ FIX 5.1
+                    "value": raw_value,                          # Raw SHAP value (can be negative)
+                    "importance": abs(raw_value) / max_shap,    # Normalized 0-1 for UI ✓ FIX 5.1
                     "dir": 1 if raw_value > 0 else -1,
                     "feature_value": float(feature_values.get(feature, 0))
                 })
-        
-        # Sort by absolute value
-        explanations.sort(key=lambda x: abs(x['value']), reverse=True)
-        
-        return explanations[:6]
+            
+            # Sort by absolute value
+            explanations.sort(key=lambda x: abs(x['value']), reverse=True)
+            
+            return explanations[:6]
+
+        except Exception as e:
+            print(f"[WARNING] SHAP explanation failed: {e}")
+            return []
     
     def _format_feature_name(self, feature: str, data: Dict = None) -> str:
         """Convert technical feature names to human-readable labels"""
@@ -840,3 +873,4 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Pipeline Results:")
     print(json.dumps(results, indent=2, default=str))
+

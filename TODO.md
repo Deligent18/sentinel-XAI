@@ -1,40 +1,20 @@
-# Sentinel-XAI Final Fixes Tracker
-**Status: IMPLEMENTING REMAINING API/BUG FIXES**
+# XAI Risk Sentinel - Bug Fixes Tracker
 
-## Completed Pipeline Steps (from previous)
-- [x] data_preprocessing.py fixes
-- [x] ml_pipeline.py fixes  
-- [x] data_service.py (partial)
-- [x] model_training.py fixes
-- [x] server.py (partial)
+## Fixes Applied to `backend/ml_pipeline.py`
 
-## 🚀 Current Steps (Approved Plan)
+- [x] **Bug 1** — `train_model`: `np.abs(shap_values)` on multi-class list crashes
+  - Stacked with `np.stack(shap_values, axis=0)` then `mean(axis=(0,1))`
+- [x] **Bug 2** — `predict_single`: Raw `df` passed to SHAP instead of engineered features
+  - Now calls `engineer_features()` → `prepare_features()` → passes `X` to SHAP
+  - Replaced redundant `self.predict(df)` with direct `model.predict(X)` / `model.predict_proba(X)`
+- [x] **Bug 3** — `generate_shap_explanation`: Wrong indexing for multi-class SHAP
+  - Extracts `sv = shap_values[2][0]` (high-risk class, first sample) into 1D array
+  - `sv[i]` now correctly indexes a scalar per feature
+- [x] **Bug 4** — `generate_shap_explanation`: Bad `max_shap` calculation
+  - `max(abs(float(sv[i])) for i in range(len(sv))) or 1.0`
 
-**TODO 1: [PENDING] backend/server.py fixes**
-- [ ] Remove `or True` performance bug
-- [ ] Enrich /login response with user info
-- [ ] Update Token model (extra=allow)
-
-**TODO 2: [PENDING] backend/data_service.py fixes**
-- [ ] Add missing CSV fields to convert_csv_to_student_format
-- [ ] Expand _to_ml_format with all features
-
-**TODO 3: [PENDING] frontend/src/api.js**
-- [ ] Add createUser() function + export
-
-**TODO 4: [PENDING] Test backend**
-`cd backend && py server.py`
-- Verify /login returns user info
-- /students no longer reloads every call
-- POST /users works
-
-**TODO 5: [PENDING] Frontend + Node install**
-Manual Node.js install → `cd frontend && npm i && npm run dev`
-
-**TODO 6: [PENDING] End-to-end test**
-- Login, view students/SHAP, create user, WS updates
-
-**TODO 7: [PENDING] Push & PR**
-
-*Next: Apply code fixes → Mark complete → Test*
+## Follow-up Steps
+- [ ] Restart backend to load fixed pipeline
+- [ ] Verify real ML predictions load (no fallback data)
+- [ ] Verify SHAP explanations render correctly for single-student predictions
 
