@@ -86,14 +86,25 @@ export async function login(username, password, role) {
 
 // ── Students ──────────────────────────────────────────────────────────────────
 
-export async function fetchStudents() {
+export async function fetchStudents(params = {}) {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/students`);
+    const qs = new URLSearchParams();
+    if (params.page)   qs.set('page',   params.page);
+    if (params.limit)  qs.set('limit',  params.limit);
+    if (params.tier)   qs.set('tier',   params.tier);
+    if (params.search) qs.set('search', params.search);
+    const url = `${API_BASE_URL}/students${qs.toString() ? '?' + qs.toString() : ''}`;
+    const response = await authenticatedFetch(url);
     if (!response.ok) throw new Error('Failed to fetch students');
-    const students = await response.json();
-    return { success: true, students };
+    const data = await response.json();
+    // Server returns { students, total, page, limit, pages }
+    if (Array.isArray(data)) {
+      return { success: true, students: data, total: data.length, page: 1, pages: 1 };
+    }
+    return { success: true, students: data.students || [], total: data.total || 0,
+             page: data.page || 1, pages: data.pages || 1 };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, students: [], total: 0, page: 1, pages: 1 };
   }
 }
 
@@ -128,8 +139,8 @@ export async function fetchStats() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/stats`);
     if (!response.ok) throw new Error('Failed to fetch stats');
-    const stats = await response.json();
-    return { success: true, stats };
+    const data = await response.json();
+    return { success: true, ...data };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -165,10 +176,11 @@ export async function fetchAuditLogs() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/audit-logs`);
     if (!response.ok) throw new Error('Failed to fetch audit logs');
-    const logs = await response.json();
+    const data = await response.json();
+    const logs = Array.isArray(data) ? data : (data.logs || []);
     return { success: true, logs };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, logs: [] };
   }
 }
 
@@ -192,10 +204,11 @@ export async function fetchUsers() {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/users`);
     if (!response.ok) throw new Error('Failed to fetch users');
-    const users = await response.json();
+    const data = await response.json();
+    const users = Array.isArray(data) ? data : (data.users || []);
     return { success: true, users };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, users: [] };
   }
 }
 
