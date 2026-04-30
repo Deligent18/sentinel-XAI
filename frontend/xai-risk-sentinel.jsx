@@ -597,10 +597,11 @@ function ClinicalDashboard({ user, onLogout }) {
     }
   }, []);
 
-  // Initial load + counts
+  // Initial load + counts + poll for ML readiness
   useEffect(() => {
     fetchPage(1, "all", "");
-    // Also fetch total counts per tier for the filter bar
+
+    // Fetch tier counts
     Promise.all([
       api.fetchStudents({page:1,limit:1,tier:"high"}),
       api.fetchStudents({page:1,limit:1,tier:"medium"}),
@@ -613,6 +614,33 @@ function ClinicalDashboard({ user, onLogout }) {
       });
     });
 
+    // Poll /predictions-status until ML is ready, then auto-refresh
+    let pollInterval = null;
+    async function pollMlStatus() {
+      try {
+        const r = await api.fetchStudents({page:1,limit:1});
+        if (r.ml_ready) {
+          clearInterval(pollInterval);
+          setPipelineMsg("ML predictions ready — refreshing…");
+          setPipelineStatus("done");
+          fetchPage(1, "all", "", true);
+          Promise.all([
+            api.fetchStudents({page:1,limit:1,tier:"high"}),
+            api.fetchStudents({page:1,limit:1,tier:"medium"}),
+            api.fetchStudents({page:1,limit:1,tier:"low"}),
+          ]).then(([h,m,l]) => {
+            setCounts({high:h.total||0,medium:m.total||0,low:l.total||0});
+          });
+          setTimeout(()=>setPipelineStatus(null), 4000);
+        } else if (r.ml_ready === false) {
+          setPipelineMsg("Computing ML predictions in background…");
+          setPipelineStatus("running");
+        }
+      } catch {}
+    }
+    pollInterval = setInterval(pollMlStatus, 8000);
+    pollMlStatus();
+
     // WebSocket real-time updates
     wsManager.connect();
     wsManager.on("student_update", updated => {
@@ -620,11 +648,12 @@ function ClinicalDashboard({ user, onLogout }) {
       setSelected(prev => prev?.id===updated.id ? updated : prev);
     });
     wsManager.on("pipeline_completed", () => {
+      clearInterval(pollInterval);
       setPipelineStatus("done"); setPipelineMsg("Pipeline complete — predictions refreshed.");
       fetchPage(1, filter, search, true);
       setTimeout(()=>setPipelineStatus(null),4000);
     });
-    return () => wsManager.disconnect();
+    return () => { wsManager.disconnect(); clearInterval(pollInterval); };
   }, []);
 
   // Filter / search change

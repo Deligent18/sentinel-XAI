@@ -21,6 +21,10 @@ import threading
 # Load environment variables
 load_dotenv()
 
+# Database (MySQL with in-memory fallback)
+from db import init_db, get_user, get_all_users, create_user as db_create_user, touch_last_login, verify_password as db_verify_password
+init_db()
+
 # Import ML Pipeline (optional - graceful degradation if not available)
 try:
     from ml_pipeline import pipeline, run_full_pipeline
@@ -38,45 +42,69 @@ except ImportError as e:
 # Global variable to store loaded students with predictions
 TRAFFIC_STUDENTS = []
 PREDICTIONS_LOADED = False
+PREDICTIONS_LOADING = False   # True while background thread is running
 
 
-def load_students_with_predictions():
+def _load_csv_students_fast():
     """
-    Load students from CSV and generate predictions using ML pipeline.
-    Returns list of students with risk scores and SHAP values.
+    Phase 1 (instant): Load students from CSV with rule-based risk scores.
+    No ML inference — returns immediately so the server can respond.
     """
-    global TRAFFIC_STUDENTS, PREDICTIONS_LOADED
-    
-    if not ML_PIPELINE_AVAILABLE:
-        print("ML Pipeline not available, using fallback")
-        return []
-    
     try:
-        # Load raw student data from CSV
         csv_data = data_service.load_students_from_csv()
-        
         if not csv_data:
-            print("No data found in CSV, using fallback")
             return []
-        
-        # Convert to API format
         students = data_service.convert_csv_to_student_format(csv_data)
-        
-        # Generate predictions using ML pipeline
+        # Attach rule-based tier/risk so the UI has something to show immediately
+        for s in students:
+            label = s.get("riskLabel", "").lower()
+            s.setdefault("tier", label if label in ("high","medium","low") else "low")
+            s.setdefault("risk", 0.85 if s["tier"]=="high" else 0.55 if s["tier"]=="medium" else 0.20)
+            s.setdefault("shap", [])
+            s.setdefault("explanation", "ML predictions are being computed in the background.")
+            s.setdefault("intervention", ["Please check back in a few minutes for full recommendations."])
+        print(f"[startup] Loaded {len(students)} students from CSV (fast path)")
+        return students
+    except Exception as e:
+        print(f"[startup] CSV load error: {e}")
+        return []
+
+
+def _run_ml_predictions_background():
+    """
+    Phase 2 (background thread): replace rule-based placeholders with real
+    ML predictions + SHAP explanations.  Runs after the server is already up.
+    """
+    global TRAFFIC_STUDENTS, PREDICTIONS_LOADED, PREDICTIONS_LOADING
+    PREDICTIONS_LOADING = True
+    print("[bg] Starting ML predictions for all students…")
+    try:
+        if not ML_PIPELINE_AVAILABLE:
+            print("[bg] ML pipeline not available — skipping")
+            return
+
+        csv_data = data_service.load_students_from_csv()
+        if not csv_data:
+            return
+        students = data_service.convert_csv_to_student_format(csv_data)
         predictions = data_service.predict_all_students(students)
-        
         if predictions:
             TRAFFIC_STUDENTS = predictions
             PREDICTIONS_LOADED = True
-            print(f"Loaded {len(TRAFFIC_STUDENTS)} students with predictions from trained model")
-            return TRAFFIC_STUDENTS
+            print(f"[bg] ML predictions complete — {len(predictions)} students updated")
         else:
-            print("No predictions generated, using fallback")
-            return []
-            
+            print("[bg] predict_all_students returned empty list")
     except Exception as e:
-        print(f"Error loading students with predictions: {e}")
-        return []
+        import traceback
+        print(f"[bg] ML prediction error: {e}")
+        traceback.print_exc()
+    finally:
+        PREDICTIONS_LOADING = False
+
+
+def load_students_with_predictions():
+    """Legacy wrapper kept for compatibility."""
+    return TRAFFIC_STUDENTS
 
 app = FastAPI(
     title="XAI Risk Sentinel API",
@@ -373,50 +401,77 @@ async def get_tier_config():
 
 @app.post("/login", response_model=Token)
 async def login(form_data: Login):
-    """
-    Authenticate user and return JWT token
-    """
-    user = next((u for u in USERS if u["username"] == form_data.username and u["role"] == form_data.role), None)
-    
-    if not user or not pwd_context.verify(form_data.password, user["password"]):
-        raise HTTPException(
-            status_code=400,
-            detail="Incorrect username, password, or role"
-        )
-    
+    """Authenticate via MySQL (or in-memory fallback)."""
+    user = get_user(form_data.username)
+    if not user or user.get("role") != form_data.role or not db_verify_password(form_data.password, user["password"]):
+        raise HTTPException(status_code=400, detail="Incorrect username, password, or role")
+    touch_last_login(form_data.username)
     access_token = create_access_token(data={"sub": user["username"], "role": user["role"]})
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "name": user.get("name", user["username"]),
-        "role": user["role"],
-        "roleLabel": user.get("roleLabel", user["role"].title()),
-        "username": user["username"],
-    }
+    return {"access_token": access_token, "token_type": "bearer",
+            "name": user.get("name", user["username"]), "role": user["role"],
+            "roleLabel": user.get("roleLabel", user["role"].title()), "username": user["username"]}
+
+@app.on_event("startup")
+async def on_startup():
+    """
+    Server startup:
+    1. Load CSV students immediately (fast, rule-based) so the API responds at once.
+    2. Kick off a background thread to compute real ML predictions.
+    """
+    import threading
+    global STUDENTS, TRAFFIC_STUDENTS
+    fast_students = _load_csv_students_fast()
+    if fast_students:
+        STUDENTS = fast_students
+        TRAFFIC_STUDENTS = fast_students
+        print(f"[startup] {len(STUDENTS)} students ready (rule-based scores)")
+    # Start background ML thread — does not block the server
+    t = threading.Thread(target=_run_ml_predictions_background, daemon=True)
+    t.start()
+    print("[startup] Background ML prediction thread started")
+
 
 @app.get("/students")
-async def get_students(current_user: dict = Depends(get_current_user)):
-    """
-    Get all students (filtered by role)
-    - Counsellor: sees full data including SHAP
-    - Welfare: sees summaries only (no SHAP/explanation)
-    - Admin: sees all data
-    
-    Uses ML pipeline predictions when available, falls back to hardcoded data
-    """
-    global STUDENTS, TRAFFIC_STUDENTS, PREDICTIONS_LOADED
-    
-    # Load predictions once on first request; re-run pipeline explicitly via /pipeline/run
-    if not PREDICTIONS_LOADED:
-        loaded_students = load_students_with_predictions()
-        if loaded_students:
-            STUDENTS = loaded_students
-            PREDICTIONS_LOADED = True
-        else:
-            print("[WARNING] Could not load ML predictions, using fallback data")
-    
+async def get_students(
+    current_user: dict = Depends(get_current_user),
+    page: int = 1,
+    limit: int = 50,
+    tier: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    """Paginated students endpoint supporting 1200+ students.
+    ?page=1&limit=50&tier=high&search=moyo
+    Always returns immediately — ML scores populate in the background."""
+    global STUDENTS, TRAFFIC_STUDENTS
+    # Use ML-enriched list if ready, else fast CSV list
+    source = TRAFFIC_STUDENTS if TRAFFIC_STUDENTS else STUDENTS
     role = current_user["role"]
-    return [filter_student_by_role(s, role) for s in STUDENTS]
+    limit = min(limit, 200)
+    filtered = source
+    if tier:
+        filtered = [s for s in filtered if s.get("tier") == tier]
+    if search:
+        q = search.lower()
+        filtered = [s for s in filtered if q in s.get("name","").lower() or q in s.get("id","").lower()]
+    total = len(filtered)
+    start = (page - 1) * limit
+    page_data = filtered[start:start + limit]
+    return {
+        "students": [filter_student_by_role(s, role) for s in page_data],
+        "total": total, "page": page, "limit": limit,
+        "pages": max(1, (total + limit - 1) // limit),
+        "ml_ready": PREDICTIONS_LOADED,
+    }
+
+@app.get("/predictions-status")
+async def predictions_status(current_user: dict = Depends(get_current_user)):
+    """Poll this to know when background ML predictions are ready."""
+    return {
+        "ml_ready":   PREDICTIONS_LOADED,
+        "loading":    PREDICTIONS_LOADING,
+        "total":      len(TRAFFIC_STUDENTS),
+    }
+
 
 @app.get("/students/{student_id}")
 async def get_student(student_id: str, current_user: dict = Depends(get_current_user)):
@@ -492,38 +547,21 @@ async def create_audit_log(
 
 @app.get("/users")
 async def get_users(current_user: dict = Depends(get_current_user)):
-    """Get system users (admin only)"""
+    """Get system users from MySQL / in-memory store (admin only)."""
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-    return SYSTEM_USERS
+    return get_all_users()
 
 @app.post("/users")
-async def create_user(
-    user: UserCreate,
-    current_user: dict = Depends(get_current_user)
-):
-    """Create a new system user (admin only)"""
+async def create_user_endpoint(user: UserCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new user, persisted to MySQL / in-memory store (admin only)."""
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-    
-    # Check if username already exists
-    if any(u["username"] == user.username for u in USERS):
-        raise HTTPException(status_code=400, detail="Username already exists")
-    
-    new_user = user.dict()
-    new_user["password"] = pwd_context.hash(user.password)
-    USERS.append(new_user)
-    
-    # Also add to SYSTEM_USERS
-    SYSTEM_USERS.append({
-        "name": user.name,
-        "username": user.username,
-        "role": user.role,
-        "status": "Active",
-        "last": "Just now"
-    })
-    
-    return {"message": "User created successfully", "username": user.username}
+    try:
+        result = db_create_user(user.username, user.password, user.name, user.role, user.roleLabel)
+        return {"message": "User created successfully", "username": result["username"]}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/stats")
 async def get_stats(current_user: dict = Depends(get_current_user)):
