@@ -3,7 +3,10 @@
  * Handles all backend communication including authentication, data fetching, and WebSocket
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// In dev: Vite proxies /api → http://localhost:8000 (no CORS issues)
+// In prod: set VITE_API_URL to your backend's full URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const API_PREFIX   = API_BASE_URL ? API_BASE_URL : '/api';
 const TOKEN_KEY = 'xai_token';
 const USER_KEY  = 'xai_user';
 
@@ -52,7 +55,7 @@ async function authenticatedFetch(url, options = {}) {
 
 export async function login(username, password, role) {
   try {
-    const response = await fetch(`${API_BASE_URL}/login`, {
+    const response = await fetch(`${API_PREFIX}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, role }),
@@ -93,7 +96,7 @@ export async function fetchStudents(params = {}) {
     if (params.limit)  qs.set('limit',  params.limit);
     if (params.tier)   qs.set('tier',   params.tier);
     if (params.search) qs.set('search', params.search);
-    const url = `${API_BASE_URL}/students${qs.toString() ? '?' + qs.toString() : ''}`;
+    const url = `${API_PREFIX}/students${qs.toString() ? '?' + qs.toString() : ''}`;
     const response = await authenticatedFetch(url);
     if (!response.ok) throw new Error('Failed to fetch students');
     const data = await response.json();
@@ -110,7 +113,7 @@ export async function fetchStudents(params = {}) {
 
 export async function fetchStudent(studentId) {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/students/${studentId}`);
+    const response = await authenticatedFetch(`${API_PREFIX}/students/${studentId}`);
     if (!response.ok) throw new Error('Failed to fetch student');
     const student = await response.json();
     return { success: true, student };
@@ -121,7 +124,7 @@ export async function fetchStudent(studentId) {
 
 export async function updateStudent(studentId, updates) {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/students/${studentId}`, {
+    const response = await authenticatedFetch(`${API_PREFIX}/students/${studentId}`, {
       method: 'POST',
       body: JSON.stringify(updates),
     });
@@ -137,7 +140,7 @@ export async function updateStudent(studentId, updates) {
 
 export async function fetchStats() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/stats`);
+    const response = await authenticatedFetch(`${API_PREFIX}/stats`);
     if (!response.ok) throw new Error('Failed to fetch stats');
     const data = await response.json();
     return { success: true, ...data };
@@ -150,7 +153,7 @@ export async function fetchStats() {
 
 export async function fetchRoles() {
   try {
-    const response = await fetch(`${API_BASE_URL}/roles`);
+    const response = await fetch(`${API_PREFIX}/roles`);
     if (!response.ok) throw new Error('Failed to fetch roles');
     const roles = await response.json();
     return { success: true, roles };
@@ -161,7 +164,7 @@ export async function fetchRoles() {
 
 export async function fetchTierConfig() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/tier`);
+    const response = await authenticatedFetch(`${API_PREFIX}/tier`);
     if (!response.ok) throw new Error('Failed to fetch tier config');
     const tier = await response.json();
     return { success: true, tier };
@@ -174,7 +177,7 @@ export async function fetchTierConfig() {
 
 export async function fetchAuditLogs() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/audit-logs`);
+    const response = await authenticatedFetch(`${API_PREFIX}/audit-logs`);
     if (!response.ok) throw new Error('Failed to fetch audit logs');
     const data = await response.json();
     const logs = Array.isArray(data) ? data : (data.logs || []);
@@ -186,7 +189,7 @@ export async function fetchAuditLogs() {
 
 export async function createAuditLog(logData) {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/audit-logs`, {
+    const response = await authenticatedFetch(`${API_PREFIX}/audit-logs`, {
       method: 'POST',
       body: JSON.stringify(logData),
     });
@@ -202,7 +205,7 @@ export async function createAuditLog(logData) {
 
 export async function fetchUsers() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/users`);
+    const response = await authenticatedFetch(`${API_PREFIX}/users`);
     if (!response.ok) throw new Error('Failed to fetch users');
     const data = await response.json();
     const users = Array.isArray(data) ? data : (data.users || []);
@@ -214,7 +217,7 @@ export async function fetchUsers() {
 
 export async function createUser(userData) {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/users`, {
+    const response = await authenticatedFetch(`${API_PREFIX}/users`, {
       method: 'POST',
       body: JSON.stringify(userData),
     });
@@ -233,7 +236,7 @@ export async function createUser(userData) {
 
 export async function getPipelineStatus() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/pipeline/status`);
+    const response = await authenticatedFetch(`${API_PREFIX}/pipeline/status`);
     if (!response.ok) throw new Error('Failed to get pipeline status');
     const status = await response.json();
     return { success: true, status };
@@ -244,7 +247,7 @@ export async function getPipelineStatus() {
 
 export async function runPipeline() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/pipeline/run`, {
+    const response = await authenticatedFetch(`${API_PREFIX}/pipeline/run`, {
       method: 'POST',
     });
     if (!response.ok) throw new Error('Failed to run pipeline');
@@ -258,7 +261,7 @@ export async function runPipeline() {
 export async function predictStudent(studentId) {
   try {
     const response = await authenticatedFetch(
-      `${API_BASE_URL}/pipeline/predict/${studentId}`,
+      `${API_PREFIX}/pipeline/predict/${studentId}`,
       { method: 'POST' }
     );
     if (!response.ok) throw new Error('Failed to predict student');
@@ -271,7 +274,7 @@ export async function predictStudent(studentId) {
 
 export async function batchUpdatePredictions() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/students/batch`, {
+    const response = await authenticatedFetch(`${API_PREFIX}/students/batch`, {
       method: 'POST',
     });
     if (!response.ok) throw new Error('Failed to batch update predictions');
@@ -286,7 +289,7 @@ export async function batchUpdatePredictions() {
 
 export async function runPreprocessing() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/preprocessing/run`, {
+    const response = await authenticatedFetch(`${API_PREFIX}/preprocessing/run`, {
       method: 'POST',
     });
     if (!response.ok) throw new Error('Failed to run preprocessing');
@@ -299,7 +302,7 @@ export async function runPreprocessing() {
 
 export async function getPreprocessingStatus() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/preprocessing/status`);
+    const response = await authenticatedFetch(`${API_PREFIX}/preprocessing/status`);
     if (!response.ok) throw new Error('Failed to get preprocessing status');
     const status = await response.json();
     return { success: true, status };
@@ -310,7 +313,7 @@ export async function getPreprocessingStatus() {
 
 export async function getPreprocessingResults() {
   try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/preprocessing/results`);
+    const response = await authenticatedFetch(`${API_PREFIX}/preprocessing/results`);
     if (!response.ok) throw new Error('Failed to get preprocessing results');
     const results = await response.json();
     return { success: true, results };
@@ -323,7 +326,7 @@ export async function getPreprocessingResults() {
 
 export async function healthCheck() {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const response = await fetch(`${API_PREFIX}/health`);
     if (!response.ok) throw new Error('Backend unhealthy');
     const data = await response.json();
     return { success: true, data };

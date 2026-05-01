@@ -112,10 +112,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS Configuration - Allow all origins for development
+# CORS Configuration
+# Note: allow_credentials=True requires explicit origins (not wildcard)
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    # Add your production domain here when deploying
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
