@@ -79,17 +79,27 @@ class DataService:
                 "name": row.get('name', ''),
                 "programme": row.get('programme', ''),
                 "year": row.get('year', 1),
-                "gpa": [
-                    row.get('gpa_sem1', 0),
-                    row.get('gpa_sem2', 0),
-                    row.get('gpa_sem3', 0)
-                ],
+                "gpa": [g for g in [
+                    float(row.get('gpa_sem1', 0) or 0),
+                    float(row.get('gpa_sem2', 0) or 0),
+                    float(row.get('gpa_sem3', 0) or 0),
+                ] if g > 0] or [0.0],  # trim trailing zeros; keep at least one value
                 "attendance": row.get('attendance', 0),
                 "lmsLogins": row.get('lms_logins', 0),
                 "facilityAccess": row.get('facility_access', 0),
                 "library_visits": row.get('library_visits', 0),
                 "after_hours_wifi": row.get('after_hours_wifi', 0),
                 "assignment_submissions": row.get('assignment_submissions', 0),
+                # risk_label from CSV used for rule-based phase and fast loading
+                "riskLabel": str(row.get('risk_label', 'low')).lower(),
+                "tier":      str(row.get('risk_label', 'low')).lower(),
+                "risk": 0.85 if str(row.get('risk_label','')).lower() == 'high'
+                        else 0.55 if str(row.get('risk_label','')).lower() == 'medium'
+                        else 0.20,
+                "shap": [],
+                "explanation": "",
+                "intervention": [],
+                "lastUpdated": "",
             }
             students.append(student)
             
@@ -175,9 +185,9 @@ class DataService:
             "name": student.get('name', ''),
             "programme": student.get('programme', ''),
             "year": student.get('year', 1),
-            "gpa_sem1": gpa[0] if len(gpa) > 0 else 0,
-            "gpa_sem2": gpa[1] if len(gpa) > 1 else gpa[0],
-            "gpa_sem3": gpa[2] if len(gpa) > 2 else gpa[0],
+            "gpa_sem1": float(gpa[0]) if len(gpa) > 0 else 0.0,
+            "gpa_sem2": float(gpa[1]) if len(gpa) > 1 else 0.0,
+            "gpa_sem3": float(gpa[2]) if len(gpa) > 2 else 0.0,
             "attendance": student.get('attendance', 0),
             "lms_logins": student.get('lmsLogins', 0),
             "facility_access": student.get('facilityAccess', 0),

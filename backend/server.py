@@ -55,14 +55,12 @@ def _load_csv_students_fast():
         if not csv_data:
             return []
         students = data_service.convert_csv_to_student_format(csv_data)
-        # Attach rule-based tier/risk so the UI has something to show immediately
+        # convert_csv_to_student_format already sets tier/risk/shap.
+        # Override explanation/intervention to show background-computing message.
         for s in students:
-            label = s.get("riskLabel", "").lower()
-            s.setdefault("tier", label if label in ("high","medium","low") else "low")
-            s.setdefault("risk", 0.85 if s["tier"]=="high" else 0.55 if s["tier"]=="medium" else 0.20)
-            s.setdefault("shap", [])
-            s.setdefault("explanation", "ML predictions are being computed in the background.")
-            s.setdefault("intervention", ["Please check back in a few minutes for full recommendations."])
+            s["explanation"]  = "ML predictions are being computed in the background."
+            s["intervention"] = ["Please check back in a few minutes for full recommendations."]
+            s["lastUpdated"]  = "computing…"
         print(f"[startup] Loaded {len(students)} students from CSV (fast path)")
         return students
     except Exception as e:
@@ -607,7 +605,9 @@ async def get_stats(current_user: dict = Depends(get_current_user)):
             pass
     
     return {
-        "totalStudents": len(STUDENTS),
+        "total": len(STUDENTS),           # frontend reads r.total
+        "counts": counts,                 # frontend reads r.counts.high etc
+        "totalStudents": len(STUDENTS),   # kept for compatibility
         "riskCounts": counts,
         "activeUsers": len([u for u in SYSTEM_USERS if u["status"] == "Active"]),
         "modelInfo": model_info
