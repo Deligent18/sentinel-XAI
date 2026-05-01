@@ -3,10 +3,12 @@
  * Handles all backend communication including authentication, data fetching, and WebSocket
  */
 
-// In dev: Vite proxies /api → http://localhost:8000 (no CORS issues)
-// In prod: set VITE_API_URL to your backend's full URL
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
-const API_PREFIX   = API_BASE_URL ? API_BASE_URL : '/api';
+// In dev:  Vite proxies /api → http://localhost:8000  (no CORS, no env var needed)
+// In prod: set VITE_API_URL=https://your-backend.com  and remove the /api prefix logic
+const _ENV_URL    = import.meta.env.VITE_API_URL || '';
+// Use the env URL only if it's a full external URL (starts with http).
+// In dev, always route through the Vite /api proxy so CORS is never an issue.
+const API_PREFIX  = _ENV_URL.startsWith('http') ? _ENV_URL : '/api';
 const TOKEN_KEY = 'xai_token';
 const USER_KEY  = 'xai_user';
 
@@ -346,7 +348,7 @@ class WebSocketManager {
   }
 
   connect() {
-    const wsUrl = API_BASE_URL.replace(/^http/, 'ws') + '/ws';
+    const wsUrl = (_ENV_URL.startsWith('http') ? _ENV_URL : 'ws://localhost:8000').replace(/^http/, 'ws') + '/ws';
     this.shouldReconnect = true;
 
     try {
@@ -439,5 +441,5 @@ export default {
   getPreprocessingResults,
   healthCheck,
   wsManager,
-  API_BASE_URL,
+  API_PREFIX,
 };
