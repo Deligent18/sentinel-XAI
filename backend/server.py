@@ -72,6 +72,8 @@ def _run_ml_predictions_background():
     """
     Phase 2 (background thread): replace rule-based placeholders with real
     ML predictions + SHAP explanations.  Runs after the server is already up.
+    Hardened: catches ALL exceptions including SystemExit/KeyboardInterrupt
+    so a crash here never kills the uvicorn process.
     """
     global TRAFFIC_STUDENTS, PREDICTIONS_LOADED, PREDICTIONS_LOADING
     PREDICTIONS_LOADING = True
@@ -81,10 +83,21 @@ def _run_ml_predictions_background():
             print("[bg] ML pipeline not available — skipping")
             return
 
+        # Re-train on current CSV if model not already trained
         csv_data = data_service.load_students_from_csv()
         if not csv_data:
+            print("[bg] No CSV data found — skipping ML predictions")
             return
+
         students = data_service.convert_csv_to_student_format(csv_data)
+
+        # Ensure model is trained on the current dataset
+        if not pipeline.is_trained:
+            print("[bg] Model not trained — training now on current CSV…")
+            import pandas as pd
+            df = pd.read_csv(data_service.csv_path if hasattr(data_service, 'csv_path') else 'data/students.csv')
+            pipeline.train_model(df, save=True)
+
         predictions = data_service.predict_all_students(students)
         if predictions:
             TRAFFIC_STUDENTS = predictions
@@ -92,12 +105,15 @@ def _run_ml_predictions_background():
             print(f"[bg] ML predictions complete — {len(predictions)} students updated")
         else:
             print("[bg] predict_all_students returned empty list")
-    except Exception as e:
+    except BaseException as e:
+        # Catch BaseException (incl. SystemExit, MemoryError) so daemon thread
+        # never propagates and never kills the uvicorn worker process
         import traceback
-        print(f"[bg] ML prediction error: {e}")
+        print(f"[bg] ML prediction error ({type(e).__name__}): {e}")
         traceback.print_exc()
     finally:
         PREDICTIONS_LOADING = False
+        print(f"[bg] Background thread finished. ml_ready={PREDICTIONS_LOADED}")
 
 
 def load_students_with_predictions():
@@ -128,7 +144,7 @@ app.add_middleware(
 )
 
 # Secret key for JWT - load from environment variable with fallback
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "xai-risk-sentinel-secret-key-2026-nust-informatics")
+SECRET_KEY = os.getenv("SECRET_KEY", os.getenv("JWT_SECRET_KEY", "xai-risk-sentinel-secret-key-2026-nust-informatics"))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -479,10 +495,35 @@ async def predictions_status(current_user: dict = Depends(get_current_user)):
     }
 
 
+@app.post("/students/batch")
+async def batch_update_predictions():
+    """Batch update predictions for all students"""
+    if not ML_PIPELINE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="ML Pipeline not available")
+    try:
+        results = data_service.batch_update_predictions(STUDENTS)
+        if results.get("status") == "success":
+            predictions = results.get("predictions", [])
+            for pred in predictions:
+                student_id = pred.get("id")
+                for i, s in enumerate(STUDENTS):
+                    if s["id"] == student_id:
+                        STUDENTS[i]["risk"] = pred.get("risk", s["risk"])
+                        STUDENTS[i]["tier"] = pred.get("tier", s["tier"])
+                        STUDENTS[i]["shap"] = pred.get("shap", s.get("shap", []))
+                        STUDENTS[i]["explanation"] = pred.get("explanation", s.get("explanation", ""))
+                        STUDENTS[i]["intervention"] = pred.get("intervention", s.get("intervention", []))
+            await manager.broadcast({"type": "batch_predictions_complete", "data": {"processed": results.get("processed")}})
+            return {"status": "success", "processed": results.get("processed"), "elapsed_seconds": results.get("elapsed_seconds")}
+        raise HTTPException(status_code=500, detail=results.get("message"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/students/{student_id}")
 async def get_student(student_id: str, current_user: dict = Depends(get_current_user)):
-    """Get a specific student by ID"""
-    student = next((s for s in STUDENTS if s["id"] == student_id), None)
+    """Get a specific student by ID — searches ML-enriched list if available"""
+    source = TRAFFIC_STUDENTS if TRAFFIC_STUDENTS else STUDENTS
+    student = next((s for s in source if s["id"] == student_id), None)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     
@@ -502,7 +543,8 @@ async def update_student(
     if current_user["role"] not in ["counsellor", "admin"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
-    student = next((s for s in STUDENTS if s["id"] == student_id), None)
+    source = TRAFFIC_STUDENTS if TRAFFIC_STUDENTS else STUDENTS
+    student = next((s for s in source if s["id"] == student_id), None)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     
@@ -576,11 +618,8 @@ async def get_stats(current_user: dict = Depends(get_current_user)):
     """
     global STUDENTS, PREDICTIONS_LOADED
     
-    # Try to load predictions if not loaded yet
-    if not PREDICTIONS_LOADED:
-        loaded_students = load_students_with_predictions()
-        if loaded_students:
-            STUDENTS = loaded_students
+    # Use whichever student list is available (fast CSV or ML-enriched)
+    # Never call the blocking load_students_with_predictions() here
     
     counts = {
         "high": len([s for s in STUDENTS if s.get("tier") == "high"]),
@@ -609,7 +648,7 @@ async def get_stats(current_user: dict = Depends(get_current_user)):
         "counts": counts,                 # frontend reads r.counts.high etc
         "totalStudents": len(STUDENTS),   # kept for compatibility
         "riskCounts": counts,
-        "activeUsers": len([u for u in SYSTEM_USERS if u["status"] == "Active"]),
+        "activeUsers": len([u for u in get_all_users() if u.get("status") == "Active"]),
         "modelInfo": model_info
     }
 
@@ -710,30 +749,6 @@ async def predict_student(student_id: str):
                 STUDENTS[i]["explanation"] = prediction.get("explanation", s.get("explanation", ""))
                 STUDENTS[i]["intervention"] = prediction.get("intervention", s.get("intervention", []))
         return {"status": "success", "prediction": prediction}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/students/batch")
-async def batch_update_predictions():
-    """Batch update predictions for all students"""
-    if not ML_PIPELINE_AVAILABLE:
-        raise HTTPException(status_code=503, detail="ML Pipeline not available")
-    try:
-        results = data_service.batch_update_predictions(STUDENTS)
-        if results.get("status") == "success":
-            predictions = results.get("predictions", [])
-            for pred in predictions:
-                student_id = pred.get("id")
-                for i, s in enumerate(STUDENTS):
-                    if s["id"] == student_id:
-                        STUDENTS[i]["risk"] = pred.get("risk", s["risk"])
-                        STUDENTS[i]["tier"] = pred.get("tier", s["tier"])
-                        STUDENTS[i]["shap"] = pred.get("shap", s.get("shap", []))
-                        STUDENTS[i]["explanation"] = pred.get("explanation", s.get("explanation", ""))
-                        STUDENTS[i]["intervention"] = pred.get("intervention", s.get("intervention", []))
-            await manager.broadcast({"type": "batch_predictions_complete", "data": {"processed": results.get("processed")}})
-            return {"status": "success", "processed": results.get("processed"), "elapsed_seconds": results.get("elapsed_seconds")}
-        raise HTTPException(status_code=500, detail=results.get("message"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

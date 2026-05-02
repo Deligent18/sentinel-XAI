@@ -65,6 +65,11 @@ jobs:
           python model_training.py 2>&1 | tee reports/training.log
           ls -lh models/ || true
 
+      - name: Evaluate model and generate SHAP
+        run: |
+          python model_evaluation.py 2>&1 | tee reports/evaluation.log || true
+          python shap_generation.py 2>&1 | tee reports/shap.log || true
+
       - name: Start FastAPI backend
         run: |
           cd backend
@@ -130,11 +135,14 @@ jobs:
           echo "$response" | python -c "
           import sys,json
           d=json.load(sys.stdin)
-          assert isinstance(d,list) and len(d)>0
-          s=d[0]
+          # Server returns paginated object {students:[...], total:N, pages:N}
+          students = d if isinstance(d,list) else d.get('students',[])
+          assert len(students) > 0, f'No students returned: {d}'
+          s=students[0]
           for f in ['id','name','programme','year','gpa','attendance','risk','tier']:
-            assert f in s, f'missing {f}'
-          print(f'/students OK - {len(d)} students')
+            assert f in s, f'missing field: {f}'
+          total = len(students) if isinstance(d,list) else d.get('total',len(students))
+          print(f'/students OK - {total} total students, page has {len(students)}')
           "
 
       - name: API test - POST /students/batch (route ordering fix)
@@ -157,8 +165,9 @@ jobs:
           echo "$response" | python -c "
           import sys,json
           d=json.load(sys.stdin)
-          assert 'totalStudents' in d or 'total_students' in d
-          print('/stats OK')
+          assert 'totalStudents' in d or 'total_students' in d or 'total' in d, f"Missing total key: {list(d.keys())}"
+          total = d.get('totalStudents') or d.get('total_students') or d.get('total',0)
+          print(f'/stats OK - {total} students')
           "
 
       - name: API test - GET /users (admin)
@@ -179,13 +188,17 @@ jobs:
       - name: API test - WebSocket /ws connects
         run: |
           pip install websockets
-          python - <<'EOF'
-          import asyncio, websockets
+          python -c "
+          import asyncio, websockets, sys
           async def test():
-            async with websockets.connect("ws://localhost:${{ env.BACKEND_PORT }}/ws", open_timeout=5) as ws:
-              print("WebSocket /ws connected successfully")
+            try:
+              async with websockets.connect('ws://localhost:${{ env.BACKEND_PORT }}/ws', open_timeout=8) as ws:
+                print('WebSocket /ws connected successfully')
+            except Exception as e:
+              print(f'WebSocket connection failed: {e}', file=sys.stderr)
+              sys.exit(1)
           asyncio.run(test())
-          EOF
+          "
 
       - name: Upload backend artifacts
         if: always()
@@ -334,11 +347,13 @@ jobs:
           print(f"Logged in as: {login['name']} ({login['roleLabel']})")
           req = urllib.request.Request(f"{BASE}/students", headers={"Authorization":f"Bearer {token}"})
           with urllib.request.urlopen(req) as r:
-            students = json.load(r)
-          assert len(students) > 0
+            data = json.load(r)
+          students = data if isinstance(data, list) else data.get("students", [])
+          assert len(students) > 0, f"No students returned: {data}"
           for f in ["id","name","programme","year","gpa","attendance","risk","tier"]:
             assert f in students[0], f"Missing field: {f}"
-          print(f"Students loaded: {len(students)} - all fields OK")
+          total = len(students) if isinstance(data,list) else data.get("total", len(students))
+          print(f"Students loaded: {total} total - all fields OK")
           req = urllib.request.Request(f"{BASE}/stats", headers={"Authorization":f"Bearer {token}"})
           with urllib.request.urlopen(req) as r:
             stats = json.load(r)
