@@ -162,13 +162,14 @@ jobs:
           response=$(curl -sf http://localhost:${{ env.BACKEND_PORT }}/stats \
             -H "Authorization: Bearer $TOKEN")
           echo "Stats: $response"
-          echo "$response" | python -c "
-          import sys,json
-          d=json.load(sys.stdin)
-          assert 'totalStudents' in d or 'total_students' in d or 'total' in d, f"Missing total key: {list(d.keys())}"
-          total = d.get('totalStudents') or d.get('total_students') or d.get('total',0)
-          print(f'/stats OK - {total} students')
-          "
+          echo "$response" | python -c '
+          import sys, json
+          d = json.load(sys.stdin)
+          keys = list(d.keys())
+          assert "totalStudents" in d or "total_students" in d or "total" in d, "Missing total key: " + str(keys)
+          total = d.get("totalStudents") or d.get("total_students") or d.get("total", 0)
+          print("/stats OK -", total, "students")
+          '
 
       - name: API test - GET /users (admin)
         run: |
