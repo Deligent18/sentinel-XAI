@@ -7,7 +7,7 @@ With Automated ML Pipeline Integration
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -28,7 +28,7 @@ init_db()
 # Import ML Pipeline (optional - graceful degradation if not available)
 try:
     from ml_pipeline import pipeline, run_full_pipeline
-    from data_service import data_service, get_statistics
+    from data_service import data_service
     from academic_results import get_academic_results
     ML_PIPELINE_AVAILABLE = True
 except ImportError as e:
@@ -77,7 +77,7 @@ def _run_ml_predictions_background():
     - Updates TRAFFIC_STUDENTS atomically so the server always has valid data.
     - Catches BaseException so no crash here can kill the uvicorn process.
     """
-    global TRAFFIC_STUDENTS, PREDICTIONS_LOADED, PREDICTIONS_LOADING
+    global TRAFFIC_STUDENTS, PREDICTIONS_LOADING
     PREDICTIONS_LOADING = True
     print("[bg] Starting ML predictions for all students...")
     try:
@@ -397,7 +397,7 @@ SYSTEM_USERS = [
 
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates"""
-    
+
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
@@ -498,7 +498,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 def filter_student_by_role(student: dict, role: str) -> dict:
     """Filter student data based on role"""
     student_copy = student.copy()
-    
+
     if role == "welfare":
         # Welfare sees summaries only (no full SHAP/explanation)
         if "shap" in student_copy:
@@ -506,7 +506,7 @@ def filter_student_by_role(student: dict, role: str) -> dict:
         if "explanation" in student_copy:
             del student_copy["explanation"]
     # Counsellor and admin see all data
-    
+
     return student_copy
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -563,7 +563,7 @@ async def get_students(
     """Paginated students endpoint supporting 1200+ students.
     ?page=1&limit=50&tier=high&search=moyo
     Always returns immediately — ML scores populate in the background."""
-    global STUDENTS, TRAFFIC_STUDENTS
+    global STUDENTS
     # Use ML-enriched list if ready, else fast CSV list
     source = TRAFFIC_STUDENTS if TRAFFIC_STUDENTS else STUDENTS
     role = current_user["role"]
@@ -625,14 +625,14 @@ async def get_student(student_id: str, current_user: dict = Depends(get_current_
     student = next((s for s in source if s["id"] == student_id), None)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
-    
+
     role = current_user["role"]
     return filter_student_by_role(student, role)
 
 @app.post("/students/{student_id}")
 async def update_student(
-    student_id: str, 
-    update: StudentUpdate, 
+    student_id: str,
+    update: StudentUpdate,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -641,23 +641,23 @@ async def update_student(
     """
     if current_user["role"] not in ["counsellor", "admin"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+
     source = TRAFFIC_STUDENTS if TRAFFIC_STUDENTS else STUDENTS
     student = next((s for s in source if s["id"] == student_id), None)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
-    
+
     # Update fields
     update_data = update.dict(exclude_unset=True)
     student.update(update_data)
     student["lastUpdated"] = datetime.now().strftime("%Y-%m-%d")
-    
+
     # Broadcast update to all connected WebSocket clients
     await manager.broadcast({
         "type": "student_update",
         "data": filter_student_by_role(student, current_user["role"])
     })
-    
+
     # Log action
     AUDIT_LOGS.insert(0, {
         "time": datetime.now().strftime("%H:%M"),
@@ -666,7 +666,7 @@ async def update_student(
         "target": student_id,
         "level": student.get("tier", "info")
     })
-    
+
     return filter_student_by_role(student, current_user["role"])
 
 @app.get("/audit-logs")
@@ -715,17 +715,17 @@ async def get_stats(current_user: dict = Depends(get_current_user)):
     """
     Get system statistics from trained ML model data
     """
-    global STUDENTS, PREDICTIONS_LOADED
-    
+
+
     # Use whichever student list is available (fast CSV or ML-enriched)
     # Never call the blocking load_students_with_predictions() here
-    
+
     counts = {
         "high": len([s for s in STUDENTS if s.get("tier") == "high"]),
         "medium": len([s for s in STUDENTS if s.get("tier") == "medium"]),
         "low": len([s for s in STUDENTS if s.get("tier") == "low"]),
     }
-    
+
     # Get model info from pipeline if available
     model_info = {
         "model": "XGBoost v2.1",
@@ -733,15 +733,15 @@ async def get_stats(current_user: dict = Depends(get_current_user)):
         "lastTrained": "22 Feb 2026",
         "auc_roc": "0.88"
     }
-    
+
     if ML_PIPELINE_AVAILABLE and pipeline:
         try:
             pipeline_status = pipeline.get_status()
             if pipeline_status.get("last_trained"):
                 model_info["lastTrained"] = pipeline_status["last_trained"]
-        except:
+        except Exception:
             pass
-    
+
     return {
         "total": len(STUDENTS),           # frontend reads r.total
         "counts": counts,                 # frontend reads r.counts.high etc
@@ -871,7 +871,7 @@ async def ingest_data(file_path: Optional[str] = None):
 
 @app.get("/academic-results/{programme}")
 async def get_programme_academic_results(
-    programme: str, 
+    programme: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -902,7 +902,7 @@ PREPROCESSING_STATE = {
 # Check if data_preprocessing.py exists
 def check_preprocessing_available():
     """Check if data_preprocessing.py file exists."""
-    import sys
+
     import os
     # Check in current directory and parent directory
     paths_to_check = [
@@ -922,15 +922,15 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
     Requires JWT authentication.
     """
     global PREPROCESSING_STATE
-    
+
     # Check if already running
     if PREPROCESSING_STATE["status"] == "running":
         return {"status": "already_running", "message": "Pipeline is already running"}
-    
+
     # Check if preprocessing script exists
     if not check_preprocessing_available():
         raise HTTPException(status_code=503, detail="data_preprocessing.py not found")
-    
+
     # Reset state
     PREPROCESSING_STATE = {
         "status": "running",
@@ -941,13 +941,13 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
         "steps_completed": [],
         "progress": []
     }
-    
+
     # Broadcast started message
     await manager.broadcast({
         "type": "preprocessing_started",
         "data": {"started_at": PREPROCESSING_STATE["started_at"]}
     })
-    
+
     def run_preprocessing_thread():
         """Background thread to run preprocessing."""
         global PREPROCESSING_STATE
@@ -955,13 +955,13 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
             # Import and run preprocessing
             import sys
             import os
-            
+
             # Add current directory to path
             current_dir = os.path.dirname(os.path.abspath(__file__))
             parent_dir = os.path.dirname(current_dir)
             if parent_dir not in sys.path:
                 sys.path.insert(0, parent_dir)
-            
+
             # Progress callback function
             def progress_callback(progress_info):
                 global PREPROCESSING_STATE
@@ -969,7 +969,7 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
                 label = progress_info.get("label", "")
                 status = progress_info.get("status", "running")
                 detail = progress_info.get("detail", "")
-                
+
                 PREPROCESSING_STATE["current_step"] = step
                 PREPROCESSING_STATE["progress"].append({
                     "step": step,
@@ -978,7 +978,7 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
                     "detail": detail,
                     "timestamp": datetime.utcnow().isoformat()
                 })
-                
+
                 # Broadcast progress
                 import asyncio
                 try:
@@ -988,17 +988,17 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
                             "type": "preprocessing_progress",
                             "data": progress_info
                         }))
-                except:
+                except Exception:
                     pass
-            
+
             # Import the preprocessing module
             from data_preprocessing import main as preprocessing_main
             preprocessing_main(progress_callback=progress_callback)
-            
+
             # Mark as complete
             PREPROCESSING_STATE["status"] = "complete"
             PREPROCESSING_STATE["completed_at"] = datetime.utcnow().isoformat()
-            
+
             # Broadcast complete
             import asyncio
             try:
@@ -1008,14 +1008,14 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
                         "type": "preprocessing_complete",
                         "data": {"completed_at": PREPROCESSING_STATE["completed_at"]}
                     }))
-            except:
+            except Exception:
                 pass
-                
+
         except Exception as e:
             PREPROCESSING_STATE["status"] = "failed"
             PREPROCESSING_STATE["error"] = str(e)
             PREPROCESSING_STATE["completed_at"] = datetime.utcnow().isoformat()
-            
+
             # Broadcast failed
             import asyncio
             try:
@@ -1025,13 +1025,13 @@ async def run_preprocessing(current_user: dict = Depends(get_current_user)):
                         "type": "preprocessing_failed",
                         "data": {"error": str(e)}
                     }))
-            except:
+            except Exception:
                 pass
-    
+
     # Start background thread
     thread = threading.Thread(target=run_preprocessing_thread, daemon=True)
     thread.start()
-    
+
     return {"status": "started", "message": "Preprocessing pipeline started", "started_at": PREPROCESSING_STATE["started_at"]}
 
 @app.get("/preprocessing/status")
@@ -1053,31 +1053,31 @@ async def get_preprocessing_results(current_user: dict = Depends(get_current_use
     """
     import os
     import pandas as pd
-    
+
     results_file = "reports/preprocessing_results.json"
     summary_file = "reports/preprocessing_summary.txt"
     missing_file = "reports/missing_values_report.csv"
-    
+
     # Check if results file exists
     if not os.path.exists(results_file):
         return {"status": "no_results", "message": "Run preprocessing first"}
-    
+
     # Read results JSON
     with open(results_file, 'r') as f:
         results = json.load(f)
-    
+
     # Read summary if exists
     summary = None
     if os.path.exists(summary_file):
         with open(summary_file, 'r') as f:
             summary = f.read()
-    
+
     # Read missing values CSV
     missing_values = []
     if os.path.exists(missing_file):
         df_missing = pd.read_csv(missing_file)
         missing_values = df_missing.to_dict('records')
-    
+
     return {
         "status": "success",
         "results": results,
@@ -1092,15 +1092,15 @@ async def get_preprocessing_plot(plot_name: str):
     No authentication required.
     """
     valid_plots = ["class_distribution", "feature_distributions", "correlation_heatmap", "features_by_risk_label"]
-    
+
     if plot_name not in valid_plots:
         raise HTTPException(status_code=400, detail=f"Invalid plot name. Valid options: {', '.join(valid_plots)}")
-    
+
     plot_file = f"plots/{plot_name}.png"
-    
+
     if not os.path.exists(plot_file):
         raise HTTPException(status_code=404, detail="Plot not found — run preprocessing first")
-    
+
     return FileResponse(plot_file, media_type="image/png")
 
 # ═══════════════════════════════════════════════════════════════════════════════
