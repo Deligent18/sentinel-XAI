@@ -70,60 +70,176 @@ def _load_csv_students_fast():
 
 def _run_ml_predictions_background():
     """
-    Phase 2 (background thread): replace rule-based placeholders with real
-    ML predictions + SHAP explanations.  Runs after the server is already up.
-    Hardened: catches ALL exceptions including SystemExit/KeyboardInterrupt
-    so a crash here never kills the uvicorn process.
+    Phase 2 (background thread): compute real ML risk scores for all students.
+    - Retrains the model if it was built on fewer samples than the current CSV.
+    - Skips per-student SHAP to avoid OOM on 1200+ students; uses the global
+      model feature importances as a lightweight substitute.
+    - Updates TRAFFIC_STUDENTS atomically so the server always has valid data.
+    - Catches BaseException so no crash here can kill the uvicorn process.
     """
     global TRAFFIC_STUDENTS, PREDICTIONS_LOADED, PREDICTIONS_LOADING
     PREDICTIONS_LOADING = True
-    print("[bg] Starting ML predictions for all students…")
+    print("[bg] Starting ML predictions for all students...")
     try:
         if not ML_PIPELINE_AVAILABLE:
             print("[bg] ML pipeline not available — skipping")
             return
 
-        # Re-train on current CSV if model not already trained
-        csv_data = data_service.load_students_from_csv()
-        if not csv_data:
-            print("[bg] No CSV data found — skipping ML predictions")
+        import pandas as pd, os, numpy as np
+
+        # ── Step 1: locate CSV ──────────────────────────────────────────────
+        csv_candidates = [
+            os.path.join(os.path.dirname(__file__), 'data', 'students.csv'),
+            os.path.join(os.path.dirname(__file__), '..', 'data', 'processed', 'students.csv'),
+        ]
+        csv_path = next((p for p in csv_candidates if os.path.exists(p)), None)
+        if not csv_path:
+            print("[bg] No CSV found — skipping ML predictions")
             return
 
+        df_full = pd.read_csv(csv_path)
+        n_csv   = len(df_full)
+
+        # ── Step 2: train/retrain if stale ──────────────────────────────────
+        loaded = pipeline.load_model() if not pipeline.is_trained else True
+        need_train = (
+            not pipeline.is_trained or
+            not loaded or
+            # Retrain when model was built on far fewer rows than current CSV
+            getattr(pipeline, '_trained_on_n', 0) < n_csv * 0.5
+        )
+        if need_train:
+            print(f"[bg] Retraining on {n_csv} rows (model was on "
+                  f"{getattr(pipeline,'_trained_on_n',0)})...")
+            pipeline.train_model(df_full, save=True)
+            pipeline._trained_on_n = n_csv
+            print(f"[bg] Retrain complete — features: {len(pipeline.feature_names)}")
+
+        if not pipeline.is_trained:
+            print("[bg] Pipeline still not trained — aborting")
+            return
+
+        # ── Step 3: batch-predict risk scores (no per-student SHAP) ─────────
+        csv_data = data_service.load_students_from_csv()
         students = data_service.convert_csv_to_student_format(csv_data)
 
-        # Ensure model is trained on the current dataset
-        if not pipeline.is_trained:
-            print("[bg] Model not trained — training now on current CSV…")
-            import pandas as pd
-            df = pd.read_csv(data_service.csv_path if hasattr(data_service, 'csv_path') else 'data/students.csv')
-            pipeline.train_model(df, save=True)
+        df_eng = pipeline.engineer_features(df_full.copy())
+        X      = pipeline.prepare_features(df_eng)
+        preds  = pipeline.model.predict(X)
+        probs  = pipeline.model.predict_proba(X)
 
-        predictions = data_service.predict_all_students(students)
-        if predictions:
-            TRAFFIC_STUDENTS = predictions
+        risk_map = {0: 'low', 1: 'medium', 2: 'high'}
+        risk_scores = probs[:, 2] + 0.5 * probs[:, 1]
+        risk_scores = np.clip(risk_scores, 0, 1)
+
+        # ── Step 4: build global SHAP feature importance (one call, not 1200) ─
+        global_shap = []
+        try:
+            import shap as shap_lib
+            explainer  = shap_lib.TreeExplainer(pipeline.model)
+            # Use a sample of max 100 rows for global importance
+            X_sample   = X.iloc[:min(100, len(X))]
+            sv         = explainer.shap_values(X_sample)          # (n, feats, classes)
+            if isinstance(sv, np.ndarray) and sv.ndim == 3:
+                imp = np.abs(sv).mean(axis=(0, 2))                # (feats,)
+            elif isinstance(sv, list):
+                imp = np.abs(np.stack(sv)).mean(axis=(0, 1))
+            else:
+                imp = np.abs(sv).mean(axis=0)
+            max_imp = imp.max() or 1.0
+            for i, feat in enumerate(pipeline.feature_names):
+                if i < len(imp):
+                    global_shap.append({
+                        "feature":   feat,
+                        "value":     float(imp[i]),
+                        "importance": float(imp[i] / max_imp),
+                        "dir":       1,
+                    })
+            global_shap.sort(key=lambda x: x["value"], reverse=True)
+            global_shap = global_shap[:6]
+            print(f"[bg] Global SHAP computed ({len(global_shap)} features)")
+        except Exception as shap_err:
+            print(f"[bg] Global SHAP failed ({shap_err}) — using feature names only")
+            global_shap = [{"feature": f, "value": 0.1, "importance": 1.0, "dir": 1}
+                           for f in pipeline.feature_names[:6]]
+
+        # ── Step 5: merge scores into student dicts ──────────────────────────
+        enriched = []
+        for i, student in enumerate(students):
+            if i >= len(preds):
+                break
+            tier  = risk_map.get(int(preds[i]), 'low')
+            risk  = float(risk_scores[i])
+            s = dict(student)
+            s['risk']        = risk
+            s['tier']        = tier
+            s['shap']        = global_shap   # same global shap for all (fast path)
+            s['explanation'] = (
+                f"{s.get('name','Student')} has a {tier} risk score of "
+                f"{round(risk*100)}%. Key factors: "
+                + ", ".join(g['feature'] for g in global_shap[:3]) + "."
+            )
+            s['intervention'] = (
+                ["Immediate counsellor contact within 24 hours",
+                 "Safety planning assessment", "Academic load review"]
+                if tier == 'high' else
+                ["Proactive welfare check", "Academic support referral"]
+                if tier == 'medium' else
+                ["Standard wellness newsletter"]
+            )
+            s['lastUpdated'] = pd.Timestamp.now().strftime('%Y-%m-%d')
+            enriched.append(s)
+
+        if enriched:
+            TRAFFIC_STUDENTS   = enriched
             PREDICTIONS_LOADED = True
-            print(f"[bg] ML predictions complete — {len(predictions)} students updated")
+            print(f"[bg] Done — {len(enriched)} students enriched with ML scores")
         else:
-            print("[bg] predict_all_students returned empty list")
+            print("[bg] No enriched students produced")
+
     except BaseException as e:
-        # Catch BaseException (incl. SystemExit, MemoryError) so daemon thread
-        # never propagates and never kills the uvicorn worker process
         import traceback
         print(f"[bg] ML prediction error ({type(e).__name__}): {e}")
         traceback.print_exc()
     finally:
         PREDICTIONS_LOADING = False
-        print(f"[bg] Background thread finished. ml_ready={PREDICTIONS_LOADED}")
+        print(f"[bg] Thread finished. ml_ready={PREDICTIONS_LOADED}")
 
 
 def load_students_with_predictions():
     """Legacy wrapper kept for compatibility."""
     return TRAFFIC_STUDENTS
 
+from contextlib import asynccontextmanager
+import threading as _threading
+
+@asynccontextmanager
+async def lifespan(app):
+    """
+    Lifespan context manager — replaces deprecated @app.on_event("startup").
+    Everything before yield() runs BEFORE uvicorn accepts the first request,
+    so /health, /stats etc. always see a fully-initialised STUDENTS list.
+    """
+    global STUDENTS, TRAFFIC_STUDENTS
+    # Phase 1: fast CSV load — completes before server accepts connections
+    fast = _load_csv_students_fast()
+    if fast:
+        STUDENTS = fast
+        TRAFFIC_STUDENTS = fast
+        print(f"[lifespan] {len(STUDENTS)} students ready (rule-based scores)")
+    # Phase 2: background ML thread — doesn't block request handling
+    t = _threading.Thread(target=_run_ml_predictions_background, daemon=True)
+    t.start()
+    print("[lifespan] Background ML prediction thread started")
+    yield  # server is live from here
+    # Shutdown logic (if needed) goes after yield
+    print("[lifespan] Server shutting down")
+
 app = FastAPI(
     title="XAI Risk Sentinel API",
     description="Backend API for Student Mental Health Risk Monitoring System",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS Configuration
@@ -433,24 +549,7 @@ async def login(form_data: Login):
             "name": user.get("name", user["username"]), "role": user["role"],
             "roleLabel": user.get("roleLabel", user["role"].title()), "username": user["username"]}
 
-@app.on_event("startup")
-async def on_startup():
-    """
-    Server startup:
-    1. Load CSV students immediately (fast, rule-based) so the API responds at once.
-    2. Kick off a background thread to compute real ML predictions.
-    """
-    import threading
-    global STUDENTS, TRAFFIC_STUDENTS
-    fast_students = _load_csv_students_fast()
-    if fast_students:
-        STUDENTS = fast_students
-        TRAFFIC_STUDENTS = fast_students
-        print(f"[startup] {len(STUDENTS)} students ready (rule-based scores)")
-    # Start background ML thread — does not block the server
-    t = threading.Thread(target=_run_ml_predictions_background, daemon=True)
-    t.start()
-    print("[startup] Background ML prediction thread started")
+# Startup handled by lifespan context manager — see app definition above
 
 
 @app.get("/students")
