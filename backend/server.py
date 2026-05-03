@@ -642,28 +642,25 @@ async def predictions_status(current_user: dict = Depends(get_current_user)):
 
 
 @app.post("/students/batch")
-async def batch_update_predictions():
-    """Batch update predictions for all students"""
+async def batch_update_predictions(current_user: dict = Depends(get_current_user)):
+    """
+    Trigger a batch ML prediction refresh for all students.
+    Returns immediately — actual predictions run in background.
+    Requires auth (any role).
+    """
     if not ML_PIPELINE_AVAILABLE:
-        raise HTTPException(status_code=503, detail="ML Pipeline not available")
-    try:
-        results = data_service.batch_update_predictions(STUDENTS)
-        if results.get("status") == "success":
-            predictions = results.get("predictions", [])
-            for pred in predictions:
-                student_id = pred.get("id")
-                for i, s in enumerate(STUDENTS):
-                    if s["id"] == student_id:
-                        STUDENTS[i]["risk"] = pred.get("risk", s["risk"])
-                        STUDENTS[i]["tier"] = pred.get("tier", s["tier"])
-                        STUDENTS[i]["shap"] = pred.get("shap", s.get("shap", []))
-                        STUDENTS[i]["explanation"] = pred.get("explanation", s.get("explanation", ""))
-                        STUDENTS[i]["intervention"] = pred.get("intervention", s.get("intervention", []))
-            await manager.broadcast({"type": "batch_predictions_complete", "data": {"processed": results.get("processed")}})
-            return {"status": "success", "processed": results.get("processed"), "elapsed_seconds": results.get("elapsed_seconds")}
-        raise HTTPException(status_code=500, detail=results.get("message"))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "unavailable", "message": "ML Pipeline not available",
+                "ml_ready": PREDICTIONS_LOADED, "total": len(TRAFFIC_STUDENTS or STUDENTS)}
+    # If already loading, report status
+    if PREDICTIONS_LOADING:
+        return {"status": "running", "message": "ML predictions already in progress",
+                "ml_ready": PREDICTIONS_LOADED, "total": len(TRAFFIC_STUDENTS or STUDENTS)}
+    # Kick off a fresh background prediction run
+    import threading as _t
+    thread = _t.Thread(target=_run_ml_predictions_background, daemon=True, name="ml-batch-refresh")
+    thread.start()
+    return {"status": "started", "message": "Batch ML prediction refresh started in background",
+            "ml_ready": PREDICTIONS_LOADED, "total": len(TRAFFIC_STUDENTS or STUDENTS)}
 
 @app.get("/students/{student_id}")
 async def get_student(student_id: str, current_user: dict = Depends(get_current_user)):
