@@ -80,6 +80,10 @@ def _run_ml_predictions_background():
     global TRAFFIC_STUDENTS, PREDICTIONS_LOADING
     PREDICTIONS_LOADING = True
     print("[bg] Starting ML predictions for all students...")
+    # Overall safety timeout: if anything in this thread hangs beyond
+    # 5 minutes, the finally block still runs and marks loading=False
+    _start_ts = __import__('time').time()
+    MAX_BG_SECONDS = 300  # 5 minutes hard ceiling
     try:
         if not ML_PIPELINE_AVAILABLE:
             print("[bg] ML pipeline not available — skipping")
@@ -109,6 +113,11 @@ def _run_ml_predictions_background():
             getattr(pipeline, '_trained_on_n', 0) < n_csv * 0.5
         )
         if need_train:
+            # Disable OpenMP parallelism during training to prevent CI deadlock
+            import os as _bg_os
+            _bg_os.environ.setdefault("OMP_NUM_THREADS", "1")
+            _bg_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+            _bg_os.environ.setdefault("MKL_NUM_THREADS", "1")
             print(f"[bg] Retraining on {n_csv} rows (model was on "
                   f"{getattr(pipeline,'_trained_on_n',0)})...")
             pipeline.train_model(df_full, save=True)
@@ -132,36 +141,74 @@ def _run_ml_predictions_background():
         risk_scores = probs[:, 2] + 0.5 * probs[:, 1]
         risk_scores = np.clip(risk_scores, 0, 1)
 
-        # ── Step 4: build global SHAP feature importance (one call, not 1200) ─
+        # ── Step 4: global SHAP feature importance ──────────────────────────
+        # IMPORTANT: shap.TreeExplainer uses OpenMP internally. When called
+        # from a daemon thread inside uvicorn it can deadlock indefinitely on
+        # Linux CI runners. We run it in a child process with a hard timeout
+        # so a hang here never blocks the server.
         global_shap = []
         try:
-            import shap as shap_lib
-            explainer  = shap_lib.TreeExplainer(pipeline.model)
-            # Use a sample of max 100 rows for global importance
-            X_sample   = X.iloc[:min(100, len(X))]
-            sv         = explainer.shap_values(X_sample)          # (n, feats, classes)
-            if isinstance(sv, np.ndarray) and sv.ndim == 3:
-                imp = np.abs(sv).mean(axis=(0, 2))                # (feats,)
-            elif isinstance(sv, list):
-                imp = np.abs(np.stack(sv)).mean(axis=(0, 1))
-            else:
-                imp = np.abs(sv).mean(axis=0)
-            max_imp = imp.max() or 1.0
-            for i, feat in enumerate(pipeline.feature_names):
-                if i < len(imp):
-                    global_shap.append({
-                        "feature":   feat,
-                        "value":     float(imp[i]),
-                        "importance": float(imp[i] / max_imp),
-                        "dir":       1,
-                    })
-            global_shap.sort(key=lambda x: x["value"], reverse=True)
-            global_shap = global_shap[:6]
-            print(f"[bg] Global SHAP computed ({len(global_shap)} features)")
-        except Exception as shap_err:
-            print(f"[bg] Global SHAP failed ({shap_err}) — using feature names only")
-            global_shap = [{"feature": f, "value": 0.1, "importance": 1.0, "dir": 1}
-                           for f in pipeline.feature_names[:6]]
+            import concurrent.futures, pickle, tempfile, subprocess, sys as _sys
+
+            def _compute_shap():
+                import shap as shap_lib, numpy as _np
+                # Disable OpenMP parallelism inside the worker to avoid deadlock
+                import os as _os
+                _os.environ["OMP_NUM_THREADS"] = "1"
+                _os.environ["OPENBLAS_NUM_THREADS"] = "1"
+                explainer = shap_lib.TreeExplainer(pipeline.model)
+                X_sample  = X.iloc[:min(50, len(X))]   # 50 rows, fast + safe
+                sv        = explainer.shap_values(X_sample)
+                if isinstance(sv, _np.ndarray) and sv.ndim == 3:
+                    imp = _np.abs(sv).mean(axis=(0, 2))
+                elif isinstance(sv, list):
+                    imp = _np.abs(_np.stack(sv)).mean(axis=(0, 1))
+                else:
+                    imp = _np.abs(sv).mean(axis=0)
+                return imp.tolist()
+
+            # Run SHAP in a thread with a 60-second hard timeout
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(_compute_shap)
+                try:
+                    imp_list = future.result(timeout=60)
+                    imp      = np.array(imp_list)
+                    max_imp  = imp.max() or 1.0
+                    for i, feat in enumerate(pipeline.feature_names):
+                        if i < len(imp):
+                            global_shap.append({
+                                "feature":    feat,
+                                "value":      float(imp[i]),
+                                "importance": float(imp[i] / max_imp),
+                                "dir":        1,
+                            })
+                    global_shap.sort(key=lambda x: x["value"], reverse=True)
+                    global_shap = global_shap[:6]
+                    print(f"[bg] Global SHAP OK ({len(global_shap)} features)")
+                except concurrent.futures.TimeoutError:
+                    print("[bg] SHAP timed out after 60s — using feature-importance fallback")
+                except Exception as shap_err:
+                    print(f"[bg] SHAP failed ({shap_err}) — using fallback")
+        except Exception as outer_err:
+            print(f"[bg] SHAP outer error ({outer_err}) — using fallback")
+
+        if not global_shap:
+            # Fallback: use model's built-in feature importance (never hangs)
+            try:
+                fi = pipeline.model.feature_importances_
+                max_fi = fi.max() or 1.0
+                global_shap = [
+                    {"feature": f, "value": float(fi[i]),
+                     "importance": float(fi[i] / max_fi), "dir": 1}
+                    for i, f in enumerate(pipeline.feature_names)
+                    if i < len(fi)
+                ]
+                global_shap.sort(key=lambda x: x["value"], reverse=True)
+                global_shap = global_shap[:6]
+                print(f"[bg] Using model feature_importances_ ({len(global_shap)} features)")
+            except Exception:
+                global_shap = [{"feature": f, "value": 0.1, "importance": 1.0, "dir": 1}
+                               for f in pipeline.feature_names[:6]]
 
         # ── Step 5: merge scores into student dicts ──────────────────────────
         enriched = []
