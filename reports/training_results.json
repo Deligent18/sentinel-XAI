@@ -1,51 +1,51 @@
 {
-  "timestamp": "2026-03-01 14:39:36",
-  "training_time_seconds": 2.018421,
+  "timestamp": "2026-05-04 09:06:58",
+  "training_time_seconds": 0.92283,
   "best_model": "XGBoost",
   "xgboost": {
     "model_type": "XGBoost Classifier",
-    "accuracy": 0.9277777777777778,
-    "precision": 0.9192982456140352,
-    "recall": 0.9277777777777778,
-    "f1_score": 0.9229386149740133,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
     "confusion_matrix": [
       [
-        652,
-        20
+        162,
+        0
       ],
       [
-        32,
-        16
+        0,
+        18
       ]
     ],
     "n_estimators": 100,
     "max_depth": 5,
     "learning_rate": 0.1,
-    "roc_auc": 0.8820064484126984
+    "roc_auc": 1.0
   },
   "random_forest": {
     "model_type": "Random Forest Classifier",
-    "accuracy": 0.9277777777777778,
-    "precision": 0.9192982456140352,
-    "recall": 0.9277777777777778,
-    "f1_score": 0.9229386149740133,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
     "confusion_matrix": [
       [
-        652,
-        20
+        162,
+        0
       ],
       [
-        32,
-        16
+        0,
+        18
       ]
     ],
     "n_estimators": 100,
     "max_depth": 10,
     "min_samples_split": 5,
     "min_samples_leaf": 2,
-    "roc_auc": 0.8543526785714286
+    "roc_auc": 1.0
   },
-  "feature_count": 37,
+  "feature_count": 23,
   "feature_names": [
     "AvgLoginFrequency",
     "TotalMissed",
@@ -69,21 +69,7 @@
     "EngagedBehaviourScore",
     "AssignmentCompletionRate",
     "LateNightRatio",
-    "YearOfStudy",
-    "IsActiveStudent",
-    "Gender_Female",
-    "Gender_Male",
-    "Programme_BSc Business Computing",
-    "Programme_BSc Computer Engineering",
-    "Programme_BSc Computer Science",
-    "Programme_BSc Data Science",
-    "Programme_BSc Informatics",
-    "Programme_BSc Information Systems",
-    "Programme_BSc Information Technology",
-    "Programme_BSc Software Engineering",
-    "AcademicStanding_Academic Probation",
-    "AcademicStanding_Good Standing",
-    "AcademicStanding_Suspended"
+    "YearOfStudy"
   ],
   "models_saved": true
 }

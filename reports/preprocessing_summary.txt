@@ -4,25 +4,25 @@ XAI Framework for Student Suicide Risk Prediction
 NUST, Department of Informatics
 =================================================================
 
-Raw dataset shape           : (4800, 28)
-Clean dataset shape         : (4800, 47)
-Total features (model input): 37
+Raw dataset shape           : (1200, 21)
+Clean dataset shape         : (1200, 30)
+Total features (model input): 23
 
 SPLIT SIZES (after SMOTE on training set)
-  Training set   : 6270 samples
-  Validation set : 721 samples
-  Test set       : 720 samples
+  Training set   : 1510 samples
+  Validation set : 181 samples
+  Test set       : 180 samples
 
 CLASS DISTRIBUTION
   Training set (post-SMOTE):
-    Class 0 (Not High Risk) : 3135
-    Class 1 (High Risk)     : 3135
+    Class 0 (Not High Risk) : 755
+    Class 1 (High Risk)     : 755
   Validation set (original):
-    Class 0 (Not High Risk) : 673
-    Class 1 (High Risk)     : 48
+    Class 0 (Not High Risk) : 163
+    Class 1 (High Risk)     : 18
   Test set (original):
-    Class 0 (Not High Risk) : 672
-    Class 1 (High Risk)     : 48
+    Class 0 (Not High Risk) : 162
+    Class 1 (High Risk)     : 18
 
 PIPELINE STEPS APPLIED
   1.  ETL — merged LMS, Academic, Campus, Student, Risk tables

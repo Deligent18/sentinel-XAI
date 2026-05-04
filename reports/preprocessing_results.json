@@ -1,26 +1,26 @@
 {
-  "completed_at": "2026-02-28T15:25:07",
+  "completed_at": "2026-05-04T09:06:44",
   "raw_shape": [
-    4800,
-    28
+    1200,
+    21
   ],
   "clean_shape": [
-    4800,
-    28
+    1200,
+    21
   ],
-  "feature_count": 37,
+  "feature_count": 23,
   "class_distribution_before": {
-    "0": 3135,
-    "1": 224
+    "0": 755,
+    "1": 84
   },
   "class_distribution_after_smote": {
-    "0": 3135,
-    "1": 3135
+    "0": 755,
+    "1": 755
   },
   "split_sizes": {
-    "train": 6270,
-    "val": 721,
-    "test": 720
+    "train": 1510,
+    "val": 181,
+    "test": 180
   },
   "missing_values_found": 0,
   "outliers_capped": {
@@ -37,8 +37,8 @@
     "GPATier"
   ],
   "validation_checks": {
-    "passed": 10,
-    "failed": 3
+    "passed": 13,
+    "failed": 0
   },
   "plots_generated": [
     "class_distribution",
